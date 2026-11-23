@@ -810,13 +810,13 @@ code {
   margin: 0 auto;
   display: block;
   resize: vertical;
-  min-height: 76px;
+  min-height: 96px;
   max-height: 40vh;
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 12px 14px;
-  font-size: 14px;
-  line-height: 1.5;
+  padding: 14px 16px;
+  font-size: 16px;
+  line-height: 1.7;
   background: #fff;
   color: var(--ink);
 }
@@ -1011,6 +1011,16 @@ code {
   padding: 1px 5px;
   border-radius: 5px;
   font-size: 0.9em;
+}
+
+.markdown a.inline-url {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  padding: 1px 5px;
+  border-radius: 5px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
 }
 
 .markdown table {
@@ -1320,7 +1330,7 @@ label {
 input,
 textarea,
 select {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink);
   background: #fff;
   border: 1px solid var(--line);

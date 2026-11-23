@@ -9,7 +9,7 @@ import {
 } from "../components/Composer";
 import { MemoryPanel } from "../components/MemoryPanel";
 import { StatusBadge } from "../components/StatusBadge";
-import { errorText, formatTime } from "../format";
+import { errorText, formatCost, formatTime } from "../format";
 import { useTurnStream } from "../hooks/useTurnStream";
 import { ROLE_LABELS } from "../labels";
 import type {
@@ -54,6 +54,7 @@ export function SessionPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const sendingRef = useRef(false);
 
   async function load() {
     if (!sessionId) return;
@@ -105,6 +106,10 @@ export function SessionPage() {
     },
   );
   const lastTurn = turns.length ? turns[turns.length - 1] : null;
+  const totalCost = turns.reduce(
+    (sum, turn) => sum + (turn.cost_usd ?? 0),
+    0,
+  );
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -112,7 +117,8 @@ export function SessionPage() {
   }, [messages.length, turns.length, liveEvents.length]);
 
   async function send() {
-    if (!session || !input.trim()) return;
+    if (!session || !input.trim() || sendingRef.current) return;
+    sendingRef.current = true;
     setBusy(true);
     setError(null);
     setMessage(null);
@@ -128,6 +134,7 @@ export function SessionPage() {
     } catch (err) {
       setError(errorText(err));
     } finally {
+      sendingRef.current = false;
       setBusy(false);
     }
   }
@@ -275,6 +282,9 @@ export function SessionPage() {
                   ? `CLI ${session.cli_session_id.slice(0, 8)}`
                   : "新 CLI 会话"}
               </span>
+              {totalCost > 0 ? (
+                <span>累计 {formatCost(totalCost)}</span>
+              ) : null}
               {activeTurn ? <StatusBadge status={liveStatus} /> : null}
             </div>
           </div>

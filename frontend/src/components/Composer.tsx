@@ -40,9 +40,23 @@ export function Composer({
   const canSend = value.trim().length > 0 && !busy && !active && !disabledReason;
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Do not send while an IME (e.g. Chinese pinyin) is composing.
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+
+    // Enter sends; Shift+Enter inserts a newline.
+    if (event.key === "Enter" && !event.shiftKey) {
+      if (canSend) {
+        event.preventDefault();
+        onSend();
+      }
+      return;
+    }
+    // Keep Ctrl/Cmd+Enter as an explicit send shortcut.
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-      event.preventDefault();
-      if (canSend) onSend();
+      if (canSend) {
+        event.preventDefault();
+        onSend();
+      }
     }
   }
 
@@ -57,8 +71,8 @@ export function Composer({
         value={value}
         placeholder={
           role === "coding"
-            ? "描述要实现的改动、要排查的问题…（Ctrl/⌘ + Enter 发送）"
-            : "提出研究问题，或粘贴资料让 Scholar 分析…（Ctrl/⌘ + Enter 发送）"
+            ? "描述要实现的改动、要排查的问题…（Enter 发送，Shift+Enter 换行）"
+            : "提出研究问题，或粘贴资料让 Scholar 分析…（Enter 发送，Shift+Enter 换行）"
         }
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}

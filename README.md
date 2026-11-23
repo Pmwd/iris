@@ -2,6 +2,8 @@
 
 Iris 是一个本地优先的个人工作台：两个角色（**Coding / Scholar**）、Session 聊天、三层记忆，通过本机 Claude Code CLI 执行。当前版本为 **v7：Session 化 + 三层记忆**。
 
+> 对外介绍或演示时，先看一页版概览：[`docs/overview.md`](docs/overview.md)。
+
 ## 核心概念
 
 - **Role**：`coding` 和 `scholar`。角色是行为、工具权限与上下文策略的组合，不是独立 Agent 或独立记忆库。
@@ -170,7 +172,9 @@ scripts/        崩溃恢复、会话/记忆报告等手工工具
 data/           本地运行数据、原始日志、日志和备份（gitignored）
 ```
 
-## 历史
+## 路线图与历史
 
+- 后续方向、可观测计划与全局系统大盘：`docs/roadmap.md`（M0 稳定 v7 → M1 可观测 → M2 大盘）。
+- v7 之前的阶段路线归档：`docs/roadmap-history.md`。
 - Phase 1–3C 的 Task/Run/Note 工作台与 Mentor v0 已归档为只读旧数据，相关决策见 `docs/decisions/`。
 - 当前模型的决策记录见 `docs/decisions/0006-session-memory.md`，验收步骤见 `docs/acceptance/phase4-sessions.md`。
