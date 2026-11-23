@@ -151,7 +151,7 @@ def test_spawn_failure_marks_turn_failed(client_factory):
     assert turn["error_type"] == "cli_spawn_failed"
 
 
-def test_schema_v7_is_non_destructive(tmp_path: Path):
+def test_schema_v8_is_non_destructive(tmp_path: Path):
     db_path = tmp_path / "iris.db"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -189,12 +189,14 @@ def test_schema_v7_is_non_destructive(tmp_path: Path):
                 "turns",
                 "facts",
                 "session_summaries",
+                "turn_approvals",
+                "permission_rules",
             )
         }
     finally:
         conn.close()
 
-    assert version == 7
+    assert version == 8
     for table in (
         "sessions",
         "turns",
@@ -204,6 +206,8 @@ def test_schema_v7_is_non_destructive(tmp_path: Path):
         "facts",
         "fact_extractions",
         "facts_fts",
+        "turn_approvals",
+        "permission_rules",
     ):
         assert table in tables
     assert counts["projects"] == 1

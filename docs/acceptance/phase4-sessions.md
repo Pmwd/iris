@@ -1,8 +1,10 @@
-# Phase 4 验收：Session 化 + 三层记忆 + 双角色
+# Phase 4 验收：Session 化 + 三层记忆 + 双角色 + SDK 审批
 
-- 目标：验证真实 CLI 下的 Session 聊天、原始/摘要/事实三层记忆，以及 Coding / Scholar 两个角色。
+- 目标：验证真实 CLI 下的 Session 聊天、原始/摘要/事实三层记忆、Coding / Scholar 两个角色，以及 Claude Agent SDK 工具审批。
 - 前置：Windows、Python 3.12、Node 20+、Claude Code CLI 已登录；建议使用独立 `IRIS_DATA_DIR`，避免污染现有数据。
-- 自动化基线：`pytest backend/tests -q` 通过（31 个测试）；`cd frontend && npm run build` 通过。
+- 自动化基线：`pytest backend/tests -q` 通过（42 个测试）；`cd frontend && npm run build` 通过。
+- 默认执行后端为 `sdk`（`IRIS_EXECUTION_BACKEND=sdk`）；工具审批依赖 `ClaudeSDKClient` 的 streaming 模式与原生 `claude.exe`。
+- M0 的 T1–T6 验收矩阵与当前证据见 `docs/acceptance/m0-real-cli.md`；本文档提供详细手工步骤。
 
 ## 1. 启动
 
@@ -19,14 +21,38 @@ $env:IRIS_DATA_DIR = "D:\vibe\Iris\data-acceptance"
 - [ ] 配置 brief；如需执行档位，添加 `PowerShell(python *)`。
 - [ ] 打开工作区详情，确认安全提示、会话数、最近更新时间。
 
+### 2.1 工作区运行面板
+
+- [ ] 在详情页底部输入一个长驻命令（例如 `npm run dev` 或 `python -m http.server 8000`），点「启动」。
+- [ ] 进程列表显示运行中、PID、启动时间；右侧日志自动刷新，可切换「跟随最新」。
+- [ ] 点「停止」→ 状态变为已停止，退出码可见，日志保留；再次启动可正常工作。
+- [ ] 归档工作区后，「启动」被禁用，但已有进程仍可停止。
+- [ ] 删除一个没有会话的工作区 → 其进程被自动停止。
+- [ ] 关闭/重启 Iris → 进程被停止，重启后列表为空（`data/workspace_processes/<id>.log` 仍保留）。
+- [ ] 输入空命令或访问不存在的工作区 → 返回 422/404，不会启动进程。
+
 ## 3. Coding 会话与多轮
 
 - [ ] 侧栏 Coding → 新会话，选择工作区。
 - [ ] 发送第一轮：例如“阅读 README，说明项目结构和启动方式；不要修改文件。”选择「只读」。
-- [ ] 观察：工具卡片流式出现；结束后出现助手最终回答；`原始日志` 链接可打开 JSONL。
+- [ ] 观察：工具卡片流式出现；助手文本按增量块滚动出现（接近终端，约 0.25 秒一批）；结束后出现助手最终回答；`原始日志` 链接可打开 JSONL。
 - [ ] 发送第二轮：例如“基于上一轮，列出两个可以改进的点。”确认第二轮为 `resume`（聊天页 meta 显示“续聊”）。
 - [ ] 停止：在长时间运行时点「停止」，确认状态变为已取消，随后仍可继续发消息。
 - [ ] 确认会话标题可由第一条消息自动生成，并在标题栏可编辑。
+
+## 3.1 工具审批（SDK 模式）
+
+- [ ] 在 Coding 会话选择「编辑」或「执行/测试」档位，发送一个会写文件的请求（例如“在工作区根目录创建 `approval-smoke.txt`，内容为 `ok`”）。
+- [ ] 确认聊天中出现审批卡片，显示工具名（Write/Edit/PowerShell）、目标路径或命令，以及风险提示；此时工具尚未执行。
+- [ ] 点「拒绝」→ 卡片显示已拒绝；文件不存在；Turn 继续或结束且助手说明未执行。
+- [ ] 重新发送同一请求并点「允许一次」→ 工具执行、文件生成；再次发送相同请求时会重新出现审批。
+- [ ] 点「总是允许」→ 本次执行；`turn_approvals` 记录 `always`，`permission_rules` 写入会话级规则；同一会话内相同命令前缀/文件路径不再弹卡片。
+- [ ] 把 `IRIS_APPROVAL_TIMEOUT_SECONDS` 设为 5 后启动，触发审批并等待 → 卡片显示已过期，工具按拒绝处理。
+- [ ] 审批等待期间点「停止」→ pending 审批被拒绝/过期，Turn 取消后没有遗留 CLI/工具进程。
+- [ ] 确认 `permission_rules` 为会话级：新会话中相同操作会重新请求审批。
+- [ ] 回退验证：`IRIS_EXECUTION_BACKEND=cli` 时不显示审批卡片，执行仍受工作区 PowerShell 白名单约束。
+
+> 审批不是 OS 沙箱：批准的命令以当前 Windows 用户身份执行；SDK 可能加载用户级 hooks/插件。只打开可信工作区。
 
 ## 4. 摘要（L2）
 

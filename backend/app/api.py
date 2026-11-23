@@ -7,10 +7,12 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
+from .api_approvals import router as approvals_router
 from .api_memory import router as memory_router
+from .api_processes import router as processes_router
 from .api_sessions import router as sessions_router
 from .api_workspaces import router as workspaces_router
-from .config import Settings
+from .config import Settings, resolve_claude_executable
 from .maintenance import backup_database, list_backups as list_backup_files
 from .repository import Repository
 from .roles import list_roles
@@ -88,6 +90,11 @@ async def health(request: Request) -> dict[str, Any]:
     except Exception:
         workspace_count = 0
     result["workspace_count"] = workspace_count
+    result["execution_backend"] = getattr(
+        request.app.state.session_manager, "execution_backend", "cli"
+    )
+    sdk_path = resolve_claude_executable(settings)
+    result["sdk_cli_path"] = str(sdk_path) if sdk_path else None
     if cli_info.get("installed"):
         result["status"] = "ok" if cli_info.get("auth_ok") is not False else "degraded"
     return result
@@ -112,3 +119,5 @@ def roles() -> list[dict[str, Any]]:
 router.include_router(workspaces_router)
 router.include_router(sessions_router)
 router.include_router(memory_router)
+router.include_router(approvals_router)
+router.include_router(processes_router)

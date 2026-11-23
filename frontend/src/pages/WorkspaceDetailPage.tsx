@@ -4,6 +4,7 @@ import { api } from "../api";
 import { errorText, formatTime, splitLines } from "../format";
 import { sessionPath } from "../labels";
 import type { Workspace } from "../types";
+import { WorkspaceRunner } from "../components/WorkspaceRunner";
 
 export function WorkspaceDetailPage() {
   const { workspaceId } = useParams();
@@ -212,7 +213,7 @@ export function WorkspaceDetailPage() {
               />
             </label>
             <label>
-              PowerShell 白名单（每行一个）
+              PowerShell 白名单（每行一个，仅 CLI 回退模式使用）
               <textarea
                 rows={5}
                 className="mono"
@@ -250,10 +251,15 @@ export function WorkspaceDetailPage() {
             </div>
           </div>
           <p className="hint">
-            Coding 会话绑定此目录；执行档位只能运行白名单里的 PowerShell 模式。删除工作区前需要先处理已有会话。
+            Coding 会话绑定此目录；SDK 模式下工具调用逐条审批，CLI 回退模式才使用白名单。删除工作区前需要先处理已有会话。
           </p>
         </section>
       </div>
+
+      <WorkspaceRunner
+        workspaceId={workspace.id}
+        archived={Boolean(workspace.archived_at)}
+      />
     </div>
   );
 }

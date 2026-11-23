@@ -237,7 +237,9 @@ export function SessionPage() {
     );
   }
 
-  const executeAllowed = Boolean(workspace?.allowed_tools?.length);
+  const approvalMode = session.execution_backend === "sdk";
+  const executeAllowed =
+    approvalMode || Boolean(workspace?.allowed_tools?.length);
   const disabledReason =
     session.status === "active"
       ? null

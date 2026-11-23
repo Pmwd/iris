@@ -1,21 +1,69 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { asRecord, asText } from "../format";
-import type { Turn, TurnEvent } from "../types";
+import type { Approval, Turn, TurnEvent } from "../types";
+import { ApprovalCard } from "./ApprovalCard";
 import { ToolCallCard, type ToolCall } from "./ToolCallCard";
 
 type ActivityItem =
   | { type: "tool"; call: ToolCall }
-  | { type: "text"; text: string }
-  | { type: "error"; text: string };
+  | { type: "text"; text: string; streaming?: boolean }
+  | { type: "error"; text: string }
+  | { type: "approval"; approval: Approval };
+
+function approvalFromPayload(payload: Record<string, unknown>): Approval | null {
+  const id = typeof payload.approval_id === "string" ? payload.approval_id : "";
+  if (!id) return null;
+  const status =
+    payload.status === "allowed" ||
+    payload.status === "denied" ||
+    payload.status === "expired"
+      ? payload.status
+      : "pending";
+  const decision =
+    payload.decision === "allow" ||
+    payload.decision === "deny" ||
+    payload.decision === "always"
+      ? payload.decision
+      : null;
+  return {
+    id,
+    turn_id: String(payload.turn_id ?? ""),
+    session_id: String(payload.session_id ?? ""),
+    tool_name: String(payload.tool_name ?? "tool"),
+    input: asRecord(payload.input),
+    status,
+    decision,
+    message: String(payload.message ?? ""),
+    decided_by:
+      typeof payload.decided_by === "string" ? payload.decided_by : null,
+    created_at: String(payload.created_at ?? ""),
+    decided_at:
+      typeof payload.decided_at === "string" ? payload.decided_at : null,
+    title: typeof payload.title === "string" ? payload.title : null,
+    description:
+      typeof payload.description === "string" ? payload.description : null,
+  };
+}
 
 function buildItems(events: TurnEvent[]): ActivityItem[] {
   const items: ActivityItem[] = [];
   const byId = new Map<string, ToolCall>();
+  const approvalIndex = new Map<string, number>();
   let lastTool: ToolCall | null = null;
+  let streamIndex: number | null = null;
+
+  const sealStream = () => {
+    if (streamIndex === null) return;
+    const item = items[streamIndex];
+    if (item && item.type === "text") item.streaming = false;
+    streamIndex = null;
+  };
+
   for (const event of events) {
     const payload = asRecord(event.payload);
     if (event.kind === "tool.use") {
+      sealStream();
       const call: ToolCall = {
         id: typeof payload.id === "string" ? payload.id : undefined,
         name: String(payload.name ?? "tool"),
@@ -25,6 +73,7 @@ function buildItems(events: TurnEvent[]): ActivityItem[] {
       if (call.id) byId.set(call.id, call);
       lastTool = call;
     } else if (event.kind === "tool.result") {
+      sealStream();
       const id =
         typeof payload.tool_use_id === "string" ? payload.tool_use_id : undefined;
       const target = (id ? byId.get(id) : undefined) ?? lastTool;
@@ -32,9 +81,42 @@ function buildItems(events: TurnEvent[]): ActivityItem[] {
         target.result = payload.content;
         target.isError = Boolean(payload.is_error);
       }
+    } else if (event.kind === "assistant.delta") {
+      const text = typeof payload.text === "string" ? payload.text : "";
+      if (!text) continue;
+      const item = streamIndex !== null ? items[streamIndex] : undefined;
+      if (item && item.type === "text") {
+        item.text += text;
+      } else {
+        items.push({ type: "text", text, streaming: true });
+        streamIndex = items.length - 1;
+      }
     } else if (event.kind === "assistant.text") {
       const text = typeof payload.text === "string" ? payload.text : "";
-      if (text.trim()) items.push({ type: "text", text });
+      const item = streamIndex !== null ? items[streamIndex] : undefined;
+      if (item && item.type === "text") {
+        item.text = text;
+        item.streaming = false;
+        streamIndex = null;
+      } else if (text.trim()) {
+        items.push({ type: "text", text });
+      }
+    } else if (
+      event.kind === "approval.requested" ||
+      event.kind === "approval.decided"
+    ) {
+      const approval = approvalFromPayload(payload);
+      if (!approval) continue;
+      const index = approvalIndex.get(approval.id);
+      if (index !== undefined) {
+        const existing = items[index];
+        if (existing.type === "approval") {
+          existing.approval = { ...existing.approval, ...approval };
+        }
+      } else {
+        approvalIndex.set(approval.id, items.length);
+        items.push({ type: "approval", approval });
+      }
     } else if (event.kind === "cli.stderr") {
       const lines = Array.isArray(payload.lines)
         ? (payload.lines as unknown[]).map(String).join("\n")
@@ -110,9 +192,19 @@ export function TurnActivity({
               item.type === "tool" ? (
                 <ToolCallCard key={index} call={item.call} />
               ) : item.type === "text" ? (
-                <div className="activity-text" key={index}>
+                <div
+                  className={
+                    item.streaming ? "activity-text streaming" : "activity-text"
+                  }
+                  key={index}
+                >
                   {item.text}
                 </div>
+              ) : item.type === "approval" ? (
+                <ApprovalCard
+                  key={`approval-${item.approval.id}-${item.approval.status}`}
+                  approval={item.approval}
+                />
               ) : (
                 <pre className="activity-error" key={index}>
                   {item.text}

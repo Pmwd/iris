@@ -42,6 +42,9 @@ def _make_settings(root: Path, **overrides) -> Settings:
         extraction_input_max_chars=40000,
         fact_context_max_chars=4000,
         memory_concurrency=1,
+        # Tests use the deterministic fake CLI through the legacy runner.
+        execution_backend="cli",
+        approval_timeout_seconds=60,
     )
     values.update(overrides)
     return Settings(**values)

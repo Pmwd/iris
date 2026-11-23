@@ -87,6 +87,7 @@ def get_session(request: Request, session_id: str) -> dict[str, Any]:
     session["latest_summary"] = sessions.latest_summary(session_id, "succeeded")
     session["active_turn"] = sessions.active_turn_for_session(session_id)
     session["turn_count"] = len(sessions.list_turns(session_id))
+    session["execution_backend"] = _settings(request).execution_backend
     return session
 
 

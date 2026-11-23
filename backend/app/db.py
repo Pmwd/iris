@@ -15,7 +15,7 @@ def utcnow() -> str:
 
 
 class Database:
-    SCHEMA_VERSION = 7
+    SCHEMA_VERSION = 8
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
@@ -53,6 +53,8 @@ class Database:
                 self._migrate_v6(conn)
             if version < 7:
                 self._migrate_v7(conn)
+            if version < 8:
+                self._migrate_v8(conn)
             conn.execute(f"PRAGMA user_version = {self.SCHEMA_VERSION}")
         finally:
             conn.close()
@@ -113,6 +115,11 @@ class Database:
         # Schema v7 adds the session/memory tables. They are created by
         # schema.sql (CREATE IF NOT EXISTS); legacy tables are left untouched.
         # Re-run FTS setup so upgraded databases get facts_fts.
+        self._setup_fts(conn)
+
+    def _migrate_v8(self, conn: sqlite3.Connection) -> None:
+        # Schema v8 adds turn_approvals and permission_rules (created by
+        # schema.sql); no legacy data is modified.
         self._setup_fts(conn)
 
     def _setup_fts(

@@ -293,3 +293,39 @@ CREATE TABLE IF NOT EXISTS fact_extractions (
 
 CREATE INDEX IF NOT EXISTS idx_fact_extractions_status
     ON fact_extractions(status);
+
+-- ----------------------------------------------------------------------
+-- Schema v8: interactive tool approvals for the Claude Agent SDK runner.
+-- ----------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS turn_approvals (
+    id TEXT PRIMARY KEY,
+    turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    tool_name TEXT NOT NULL,
+    input_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL,
+    decision TEXT,
+    message TEXT NOT NULL DEFAULT '',
+    decided_by TEXT,
+    created_at TEXT NOT NULL,
+    decided_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_turn_approvals_turn
+    ON turn_approvals(turn_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_turn_approvals_status
+    ON turn_approvals(status);
+
+CREATE TABLE IF NOT EXISTS permission_rules (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    tool_name TEXT NOT NULL,
+    match_type TEXT NOT NULL,
+    match_value TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(session_id, tool_name, match_type, match_value)
+);
+
+CREATE INDEX IF NOT EXISTS idx_permission_rules_session
+    ON permission_rules(session_id, tool_name);

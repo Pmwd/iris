@@ -13,9 +13,12 @@ from .config import PROJECT_ROOT, Settings, load_settings
 from .db import Database
 from .logging_setup import configure_logging
 from .repository import Repository
+from .repository_approvals import ApprovalRepository
 from .repository_facts import FactRepository
 from .repository_sessions import SessionRepository
+from .services.approvals import ApprovalManager
 from .services.memory import MemoryManager
+from .services.processes import WorkspaceProcessManager
 from .services.sessions import SessionManager
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -41,31 +44,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     repo = Repository(database)
     session_repo = SessionRepository(database)
     fact_repo = FactRepository(database)
+    approval_repo = ApprovalRepository(database)
     reconciled = session_repo.reconcile_interrupted_turns()
+    approval_manager = ApprovalManager(approval_repo, settings)
+    approval_manager.reconcile()
     memory_manager = MemoryManager(repo, session_repo, fact_repo, settings)
     memory_manager.reconcile()
-    session_manager = SessionManager(repo, session_repo, fact_repo, settings)
+    process_manager = WorkspaceProcessManager(repo, settings)
+    session_manager = SessionManager(
+        repo,
+        session_repo,
+        fact_repo,
+        settings,
+        approval_manager=approval_manager,
+    )
     session_manager.memory = memory_manager
     logger.info(
-        "Iris started data_dir=%s db=%s reconciled_turns=%s",
+        "Iris started data_dir=%s db=%s reconciled_turns=%s backend=%s",
         settings.data_dir,
         settings.db_path,
         reconciled,
+        session_manager.execution_backend,
     )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         yield
+        await asyncio.to_thread(process_manager.shutdown)
         await asyncio.to_thread(session_manager.shutdown)
         await asyncio.to_thread(memory_manager.shutdown)
 
-    app = FastAPI(title="Iris", version="0.7.0", lifespan=lifespan)
+    app = FastAPI(title="Iris", version="0.8.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.repo = repo
     app.state.session_repo = session_repo
     app.state.fact_repo = fact_repo
+    app.state.approval_repo = approval_repo
+    app.state.approval_manager = approval_manager
     app.state.session_manager = session_manager
     app.state.memory_manager = memory_manager
+    app.state.process_manager = process_manager
 
     def guarded_error(detail: str, status_code: int) -> JSONResponse:
         response = JSONResponse({"detail": detail}, status_code=status_code)

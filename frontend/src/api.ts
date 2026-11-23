@@ -1,4 +1,6 @@
 import type {
+  Approval,
+  ApprovalDecision,
   BackupInfo,
   Extraction,
   Fact,
@@ -6,8 +8,10 @@ import type {
   FactRole,
   FactScope,
   Health,
+  ManagedProcess,
   Message,
   PermissionProfile,
+  ProcessLogs,
   Role,
   RoleId,
   Session,
@@ -81,6 +85,19 @@ export const api = {
   deleteWorkspace: (id: string) =>
     request<{ deleted: boolean }>(`/workspaces/${id}`, { method: "DELETE" }),
 
+  listProcesses: (workspaceId: string) =>
+    request<ManagedProcess[]>(`/workspaces/${workspaceId}/processes`),
+  startProcess: (workspaceId: string, body: { command: string; label?: string }) =>
+    request<ManagedProcess>(`/workspaces/${workspaceId}/processes`, json(body)),
+  getProcess: (processId: string) =>
+    request<ManagedProcess>(`/processes/${processId}`),
+  getProcessLogs: (processId: string, afterSeq = 0) =>
+    request<ProcessLogs>(
+      `/processes/${processId}/logs${query({ after_seq: afterSeq })}`,
+    ),
+  stopProcess: (processId: string) =>
+    request<ManagedProcess>(`/processes/${processId}/stop`, { method: "POST" }),
+
   listSessions: (params: {
     role?: RoleId;
     project_id?: string;
@@ -128,6 +145,18 @@ export const api = {
   turnStreamUrl: (turnId: string, afterSeq = 0) =>
     `${BASE}/turns/${turnId}/events/stream${query({ after_seq: afterSeq })}`,
   turnRawUrl: (turnId: string) => `${BASE}/turns/${turnId}/raw`,
+
+  listTurnApprovals: (turnId: string) =>
+    request<Approval[]>(`/turns/${turnId}/approvals`),
+  decideApproval: (
+    approvalId: string,
+    decision: ApprovalDecision,
+    message = "",
+  ) =>
+    request<Approval>(
+      `/approvals/${approvalId}/decide`,
+      json({ decision, message }),
+    ),
 
   getSummary: (sessionId: string) =>
     request<SummaryResponse>(`/sessions/${sessionId}/summary`),

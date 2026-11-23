@@ -15,8 +15,10 @@ from ..repository import Repository
 from ..repository_facts import FactRepository
 from ..repository_sessions import SessionRepository
 from ..roles import ROLES, get_role
+from .approvals import ApprovalManager
 from .facts import FactSelectionError, select_facts
 from .prompts import build_turn_prompt
+from .sdk_runner import SdkTurnRunner
 
 logger = logging.getLogger("iris.sessions")
 
@@ -44,12 +46,31 @@ class SessionManager:
         repo_sessions: SessionRepository,
         repo_facts: FactRepository,
         settings: Settings,
+        approval_manager: ApprovalManager | None = None,
     ) -> None:
         self.repo_projects = repo_projects
         self.repo_sessions = repo_sessions
         self.repo_facts = repo_facts
         self.settings = settings
         self.memory: Any = None  # set after construction to avoid a cycle
+        self.execution_backend = (
+            settings.execution_backend
+            if settings.execution_backend in {"sdk", "cli"}
+            else "cli"
+        )
+        self.sdk_runner: SdkTurnRunner | None = None
+        if self.execution_backend == "sdk" and approval_manager is not None:
+            self.sdk_runner = SdkTurnRunner(
+                repo_sessions,
+                settings,
+                approval_manager,
+                on_success=self._notify_success,
+            )
+        elif self.execution_backend == "sdk":
+            logger.warning(
+                "execution_backend=sdk without an approval manager; using cli"
+            )
+            self.execution_backend = "cli"
         self.supervisor = ProcessSupervisor()
         self._lock = threading.Lock()
         self._processes: dict[str, Any] = {}
@@ -164,7 +185,11 @@ class SessionManager:
                     raise TurnError(
                         "another coding turn is active in this workspace", 409
                     )
-            if profile == "execute" and not (project and project.get("allowed_tools")):
+            if (
+                profile == "execute"
+                and self.sdk_runner is None
+                and not (project and project.get("allowed_tools"))
+            ):
                 raise TurnError(
                     "execute profile requires at least one allowed PowerShell pattern",
                     422,
@@ -179,7 +204,10 @@ class SessionManager:
                 workspace.mkdir(parents=True, exist_ok=True)
 
             mode = "resume" if session.get("cli_session_id") else "new"
-            cli_session_id = session.get("cli_session_id") or str(uuid4())
+            if self.sdk_runner is not None:
+                cli_session_id = session.get("cli_session_id")
+            else:
+                cli_session_id = session.get("cli_session_id") or str(uuid4())
             summary = (
                 self.repo_sessions.latest_summary(session_id, "succeeded")
                 if mode == "new"
@@ -245,6 +273,34 @@ class SessionManager:
             except Exception:
                 logger.exception("facts.mark_used_failed turn_id=%s", turn_id)
 
+            if self.sdk_runner is not None:
+                self.sdk_runner.start(
+                    turn_id=turn_id,
+                    session_id=session_id,
+                    workspace=workspace,
+                    prompt=pack.prompt,
+                    profile=profile,
+                    role_instruction=role.system_instruction,
+                    resume=(
+                        session.get("cli_session_id")
+                        if mode == "resume"
+                        else None
+                    ),
+                    raw_log_path=raw_log_path,
+                )
+                logger.info(
+                    "turn.started turn_id=%s session_id=%s role=%s profile=%s mode=%s backend=sdk",
+                    turn_id,
+                    session_id,
+                    role.id,
+                    profile,
+                    mode,
+                )
+                return {
+                    "turn": self.repo_sessions.get_turn(turn_id) or turn,
+                    "user_message": user_message,
+                }
+
             command = build_command(
                 self.settings,
                 cli_session_id,
@@ -288,6 +344,25 @@ class SessionManager:
         if turn["status"] not in ACTIVE_STATUSES:
             raise TurnError("turn is not active", 409)
 
+        if self.sdk_runner is not None and (
+            self.sdk_runner.is_active(turn_id) or self.execution_backend == "sdk"
+        ):
+            with self._lock:
+                self._cancel_reasons[turn_id] = "user"
+                self.repo_sessions.set_turn_canceling(turn_id)
+            canceled = self.sdk_runner.cancel(turn_id)
+            if not canceled:
+                self.repo_sessions.finish_turn(
+                    turn_id,
+                    turn["session_id"],
+                    "canceled",
+                    error_type="canceled",
+                    error_message="Turn was canceled by the user.",
+                    add_result_message=False,
+                )
+            logger.info("turn.cancel_requested turn_id=%s backend=sdk", turn_id)
+            return self.repo_sessions.get_turn(turn_id) or turn
+
         with self._lock:
             process = self._processes.get(turn_id)
             self._cancel_reasons[turn_id] = "user"
@@ -320,6 +395,8 @@ class SessionManager:
             self.supervisor.terminate(process)
         for thread in threads:
             thread.join(timeout=3)
+        if self.sdk_runner is not None:
+            self.sdk_runner.shutdown()
         self.supervisor.close()
 
     def reconcile_interrupted_turns(self) -> int:

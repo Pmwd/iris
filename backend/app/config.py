@@ -20,7 +20,7 @@ class Settings:
     run_timeout_seconds: int = 1800
     max_context_chars: int = 16000
     max_event_payload_chars: int = 20000
-    sse_poll_seconds: float = 0.4
+    sse_poll_seconds: float = 0.25
     research_max_subtasks: int = 5
     research_concurrency: int = 2
     research_subtask_max_turns: int = 8
@@ -39,6 +39,11 @@ class Settings:
     extraction_timeout_seconds: int = 180
     memory_concurrency: int = 1
     fact_context_max_chars: int = 4000
+    # Execution backend: "sdk" (Claude Agent SDK, interactive approvals) or
+    # "cli" (legacy one-shot stream-json runner; used by tests/fake CLI).
+    execution_backend: str = "sdk"
+    claude_cli_path: str | None = None
+    approval_timeout_seconds: int = 600
 
 
 def _default_claude_command() -> list[str]:
@@ -101,4 +106,45 @@ def load_settings() -> Settings:
         extraction_timeout_seconds=_int_env("IRIS_EXTRACTION_TIMEOUT_SECONDS", 180),
         memory_concurrency=_int_env("IRIS_MEMORY_CONCURRENCY", 1),
         fact_context_max_chars=_int_env("IRIS_FACT_CONTEXT_MAX_CHARS", 4000),
+        execution_backend=os.environ.get("IRIS_EXECUTION_BACKEND", "sdk").strip().lower(),
+        claude_cli_path=os.environ.get("IRIS_CLAUDE_CLI_PATH") or None,
+        approval_timeout_seconds=_int_env("IRIS_APPROVAL_TIMEOUT_SECONDS", 600),
     )
+
+
+def resolve_claude_executable(settings: Settings) -> Path | None:
+    """Resolve the native Claude Code executable the Agent SDK can spawn.
+
+    The Agent SDK on Windows expects ``claude.exe``; npm's ``claude.cmd`` shim
+    is not accepted. We derive the packaged .exe from the shim when possible.
+    """
+    if settings.claude_cli_path:
+        path = Path(settings.claude_cli_path).expanduser()
+        return path if path.is_file() else None
+
+    candidate = shutil.which("claude.exe")
+    if candidate:
+        return Path(candidate)
+
+    candidate = shutil.which("claude")
+    if candidate:
+        path = Path(candidate)
+        if path.suffix.lower() in {".cmd", ".bat"}:
+            exe = (
+                path.parent
+                / "node_modules"
+                / "@anthropic-ai"
+                / "claude-code"
+                / "bin"
+                / "claude.exe"
+            )
+            if exe.is_file():
+                return exe
+        if path.is_file():
+            return path
+
+    if settings.claude_command:
+        first = Path(settings.claude_command[0])
+        if first.name.lower().startswith("claude") and first.is_file():
+            return first
+    return None

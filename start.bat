@@ -42,11 +42,18 @@ exit /b 0
 echo [Iris] Creating .venv with %PY_CMD% ...
 %PY_CMD% -m venv .venv
 if errorlevel 1 goto :fail
-echo [Iris] Installing backend dependencies ...
-".venv\Scripts\python.exe" -m pip install -e "backend[dev]"
+call :install_backend
 if errorlevel 1 goto :fail
 
 :deps_ready
+rem The SDK is only needed for the default execution backend, but installing
+rem the declared dependency keeps fresh checkouts consistent.
+".venv\Scripts\python.exe" -c "import claude_agent_sdk" >nul 2>nul
+if errorlevel 1 (
+  call :install_backend
+  if errorlevel 1 goto :fail
+)
+
 if not exist "frontend\dist\index.html" (
   where npm >nul 2>nul
   if errorlevel 1 (
@@ -71,6 +78,14 @@ echo [Iris] Close this window or press Ctrl+C to stop.
 ".venv\Scripts\python.exe" -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port %PORT%
 pause
 exit /b 0
+
+:install_backend
+echo [Iris] Installing backend dependencies ...
+".venv\Scripts\python.exe" -m pip install -e "backend[dev]"
+if not errorlevel 1 exit /b 0
+echo [Iris] Default PyPI failed; retrying with Tsinghua mirror ...
+".venv\Scripts\python.exe" -m pip install -e "backend[dev]" -i https://pypi.tuna.tsinghua.edu.cn/simple
+exit /b %errorlevel%
 
 :fail
 echo [Iris] Startup failed. Copy the error above for diagnosis.

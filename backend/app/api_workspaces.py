@@ -9,6 +9,7 @@ from .repository import Repository
 from .repository_sessions import SessionRepository
 from .schemas import WorkspaceCreate, WorkspaceUpdate
 from .security import workspace_warnings
+from .services.processes import WorkspaceProcessManager
 
 router = APIRouter()
 
@@ -19,6 +20,10 @@ def _repo(request: Request) -> Repository:
 
 def _sessions(request: Request) -> SessionRepository:
     return request.app.state.session_repo
+
+
+def _processes(request: Request) -> WorkspaceProcessManager:
+    return request.app.state.process_manager
 
 
 def _require_project(repo: Repository, project_id: str) -> dict[str, Any]:
@@ -96,4 +101,5 @@ def delete_workspace(request: Request, project_id: str) -> dict[str, bool]:
                 f"workspace still has {count} session(s); delete or move them first"
             ),
         )
+    _processes(request).stop_for_project(project_id)
     return {"deleted": repo.delete_project(project_id)}

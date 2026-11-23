@@ -250,7 +250,7 @@ class SessionRepository:
         project_id: str | None,
         mode: str,
         permission_profile: str,
-        cli_session_id: str,
+        cli_session_id: str | None,
         context_manifest: dict[str, Any],
         raw_log_path: str,
     ) -> dict[str, Any]:
@@ -324,7 +324,7 @@ class SessionRepository:
         )
         return [t for t in (_turn(row) for row in rows) if t is not None]
 
-    def set_turn_running(self, turn_id: str, pid: int) -> None:
+    def set_turn_running(self, turn_id: str, pid: int | None) -> None:
         self.db.execute(
             """
             UPDATE turns
@@ -443,21 +443,26 @@ class SessionRepository:
         payload: Any,
         truncated: bool = False,
     ) -> None:
-        self.db.execute(
-            """
-            INSERT INTO turn_events
-                (turn_id, seq, kind, payload_json, truncated, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                turn_id,
-                seq,
-                kind,
-                json.dumps(payload, ensure_ascii=False),
-                1 if truncated else 0,
-                utcnow(),
-            ),
-        )
+        try:
+            self.db.execute(
+                """
+                INSERT INTO turn_events
+                    (turn_id, seq, kind, payload_json, truncated, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    turn_id,
+                    seq,
+                    kind,
+                    json.dumps(payload, ensure_ascii=False),
+                    1 if truncated else 0,
+                    utcnow(),
+                ),
+            )
+        except sqlite3.IntegrityError:
+            # The turn/session may have been deleted while a monitor thread was
+            # finishing; the event is no longer relevant.
+            return
 
     def list_turn_events(
         self, turn_id: str, after_seq: int = 0, limit: int = 500

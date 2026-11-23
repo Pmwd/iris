@@ -51,7 +51,53 @@ export interface Session {
   latest_summary?: Summary | null;
   active_turn?: Turn | null;
   turn_count?: number;
+  execution_backend?: "sdk" | "cli";
 }
+
+export type ProcessStatus =
+  | "starting"
+  | "running"
+  | "stopping"
+  | "stopped"
+  | "failed";
+
+export interface ManagedProcess {
+  id: string;
+  project_id: string;
+  command: string;
+  label: string;
+  cwd: string;
+  status: ProcessStatus;
+  pid: number | null;
+  started_at: string;
+  ended_at: string | null;
+  exit_code: number | null;
+  error: string | null;
+  seq: number;
+}
+
+export interface ProcessLogs {
+  process: ManagedProcess;
+  lines: Array<{ seq: number; text: string }>;
+}
+
+export interface Approval {
+  id: string;
+  turn_id: string;
+  session_id: string;
+  tool_name: string;
+  input: Record<string, unknown>;
+  status: "pending" | "allowed" | "denied" | "expired";
+  decision: "allow" | "deny" | "always" | null;
+  message: string;
+  decided_by: string | null;
+  created_at: string;
+  decided_at: string | null;
+  title?: string | null;
+  description?: string | null;
+}
+
+export type ApprovalDecision = "allow" | "deny" | "always";
 
 export interface PromptManifest {
   prompt_version?: string;

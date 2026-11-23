@@ -81,3 +81,13 @@ class FactExtractRequest(BaseModel):
     project_id: str | None = None
     session_ids: list[str] | None = None
     max_sessions: int | None = Field(default=None, ge=1, le=50)
+
+
+class ApprovalDecide(BaseModel):
+    decision: Literal["allow", "deny", "always"]
+    message: str = Field(default="", max_length=2000)
+
+
+class ProcessStart(BaseModel):
+    command: str = Field(min_length=1, max_length=4000)
+    label: str = Field(default="", max_length=120)

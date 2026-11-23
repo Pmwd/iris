@@ -98,10 +98,19 @@ export const TURN_STATUS_LABELS: Record<string, string> = {
   interrupted: "已中断",
 };
 
+export const PROCESS_STATUS_LABELS: Record<string, string> = {
+  starting: "启动中",
+  running: "运行中",
+  stopping: "停止中",
+  stopped: "已停止",
+  failed: "启动失败",
+};
+
 export const STATUS_LABELS: Record<string, string> = {
   ...FACT_STATUS_LABELS,
   ...SESSION_STATUS_LABELS,
   ...TURN_STATUS_LABELS,
+  ...PROCESS_STATUS_LABELS,
 };
 
 export const FACT_REASON_LABELS: Record<string, string> = {
