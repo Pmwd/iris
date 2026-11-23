@@ -146,3 +146,150 @@ CREATE TABLE IF NOT EXISTS research_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_research_events_job ON research_events(job_id, id);
+
+-- ----------------------------------------------------------------------
+-- Schema v7: session-oriented workbench + three-layer memory.
+-- Legacy tables above stay read-only; new code only uses the tables below.
+-- ----------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    role TEXT NOT NULL,
+    title TEXT NOT NULL,
+    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    cli_session_id TEXT,
+    cli_session_confirmed INTEGER NOT NULL DEFAULT 0,
+    summary_covers_turn_seq INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    ended_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_role ON sessions(role, updated_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
+
+CREATE TABLE IF NOT EXISTS turns (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+    status TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    permission_profile TEXT NOT NULL,
+    cli_session_id TEXT,
+    prompt_manifest_json TEXT NOT NULL DEFAULT '{}',
+    pid INTEGER,
+    raw_log_path TEXT,
+    started_at TEXT,
+    ended_at TEXT,
+    exit_code INTEGER,
+    cost_usd REAL,
+    usage_json TEXT,
+    result_text TEXT,
+    error_type TEXT,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE(session_id, seq)
+);
+
+CREATE INDEX IF NOT EXISTS idx_turns_session ON turns(session_id, seq);
+CREATE INDEX IF NOT EXISTS idx_turns_status ON turns(status);
+
+-- One active turn per session, and one active coding turn per workspace.
+-- These indexes are the backstop for the application-level checks.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_turns_active_session
+    ON turns(session_id)
+    WHERE status IN ('starting', 'running', 'canceling');
+CREATE UNIQUE INDEX IF NOT EXISTS uq_turns_active_code_workspace
+    ON turns(project_id)
+    WHERE project_id IS NOT NULL
+      AND role = 'coding'
+      AND status IN ('starting', 'running', 'canceling');
+
+CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    turn_id TEXT REFERENCES turns(id) ON DELETE SET NULL,
+    seq INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    UNIQUE(session_id, seq)
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
+
+CREATE TABLE IF NOT EXISTS turn_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    truncated INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    UNIQUE(turn_id, seq)
+);
+
+CREATE INDEX IF NOT EXISTS idx_turn_events_turn ON turn_events(turn_id, seq);
+
+CREATE TABLE IF NOT EXISTS session_summaries (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    covers_through_turn_seq INTEGER NOT NULL DEFAULT 0,
+    content_md TEXT NOT NULL DEFAULT '',
+    model TEXT,
+    cost_usd REAL,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_summaries_session
+    ON session_summaries(session_id, status);
+
+CREATE TABLE IF NOT EXISTS facts (
+    id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL,
+    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    role TEXT NOT NULL DEFAULT 'both',
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content_md TEXT NOT NULL DEFAULT '',
+    aliases_json TEXT NOT NULL DEFAULT '[]',
+    pinned INTEGER NOT NULL DEFAULT 0,
+    use_count INTEGER NOT NULL DEFAULT 0,
+    last_used_at TEXT,
+    source_session_ids_json TEXT NOT NULL DEFAULT '[]',
+    evidence_md TEXT NOT NULL DEFAULT '',
+    confidence REAL,
+    supersedes_id TEXT REFERENCES facts(id) ON DELETE SET NULL,
+    extracted_at TEXT,
+    reviewed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_facts_status ON facts(status, scope);
+CREATE INDEX IF NOT EXISTS idx_facts_project ON facts(project_id);
+
+CREATE TABLE IF NOT EXISTS fact_extractions (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    scope_json TEXT NOT NULL DEFAULT '{}',
+    candidate_count INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    ended_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_fact_extractions_status
+    ON fact_extractions(status);

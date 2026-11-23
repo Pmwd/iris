@@ -15,7 +15,7 @@ def utcnow() -> str:
 
 
 class Database:
-    SCHEMA_VERSION = 6
+    SCHEMA_VERSION = 7
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
@@ -51,6 +51,8 @@ class Database:
                 self._migrate_v4(conn)
             if version < 6:
                 self._migrate_v6(conn)
+            if version < 7:
+                self._migrate_v7(conn)
             conn.execute(f"PRAGMA user_version = {self.SCHEMA_VERSION}")
         finally:
             conn.close()
@@ -107,6 +109,12 @@ class Database:
                 "ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0"
             )
 
+    def _migrate_v7(self, conn: sqlite3.Connection) -> None:
+        # Schema v7 adds the session/memory tables. They are created by
+        # schema.sql (CREATE IF NOT EXISTS); legacy tables are left untouched.
+        # Re-run FTS setup so upgraded databases get facts_fts.
+        self._setup_fts(conn)
+
     def _setup_fts(
         self, conn: sqlite3.Connection, force_rebuild: bool = False
     ) -> None:
@@ -127,6 +135,12 @@ class Database:
                 """
                 CREATE VIRTUAL TABLE IF NOT EXISTS global_notes_fts
                 USING fts5(note_id UNINDEXED, title, content)
+                """
+            )
+            conn.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts
+                USING fts5(fact_id UNINDEXED, title, content)
                 """
             )
             self.fts_enabled = True
@@ -164,6 +178,25 @@ class Database:
                         VALUES (?, ?, ?)
                         """,
                         (row[0], row[1], row[2] + ("\n" + alias_text if alias_text else "")),
+                    )
+            rebuild_facts = force_rebuild or "facts_fts" not in existing
+            if rebuild_facts:
+                conn.execute("DELETE FROM facts_fts")
+                for row in conn.execute(
+                    "SELECT id, title, content_md, aliases_json FROM facts"
+                ).fetchall():
+                    aliases = json.loads(row[3] or "[]")
+                    alias_text = " ".join(str(alias) for alias in aliases)
+                    conn.execute(
+                        """
+                        INSERT INTO facts_fts(fact_id, title, content)
+                        VALUES (?, ?, ?)
+                        """,
+                        (
+                            row[0],
+                            row[1],
+                            row[2] + ("\n" + alias_text if alias_text else ""),
+                        ),
                     )
         except sqlite3.OperationalError:
             self.fts_enabled = False

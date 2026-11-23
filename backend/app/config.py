@@ -27,6 +27,18 @@ class Settings:
     research_subtask_timeout_seconds: int = 600
     research_subtask_max_attempts: int = 3
     research_subtask_backoff_seconds: int = 2
+    # Three-layer memory (schema v7).
+    summary_trigger_turns: int = 8
+    summary_trigger_chars: int = 24000
+    summary_input_max_chars: int = 30000
+    summary_max_turns: int = 2
+    summary_timeout_seconds: int = 180
+    extraction_max_sessions: int = 8
+    extraction_input_max_chars: int = 40000
+    extraction_max_turns: int = 2
+    extraction_timeout_seconds: int = 180
+    memory_concurrency: int = 1
+    fact_context_max_chars: int = 4000
 
 
 def _default_claude_command() -> list[str]:
@@ -78,4 +90,15 @@ def load_settings() -> Settings:
         research_subtask_backoff_seconds=_int_env(
             "IRIS_RESEARCH_SUBTASK_BACKOFF_SECONDS", 2
         ),
+        summary_trigger_turns=_int_env("IRIS_SUMMARY_TRIGGER_TURNS", 8),
+        summary_trigger_chars=_int_env("IRIS_SUMMARY_TRIGGER_CHARS", 24000),
+        summary_input_max_chars=_int_env("IRIS_SUMMARY_INPUT_MAX_CHARS", 30000),
+        summary_max_turns=_int_env("IRIS_SUMMARY_MAX_TURNS", 2),
+        summary_timeout_seconds=_int_env("IRIS_SUMMARY_TIMEOUT_SECONDS", 180),
+        extraction_max_sessions=_int_env("IRIS_EXTRACTION_MAX_SESSIONS", 8),
+        extraction_input_max_chars=_int_env("IRIS_EXTRACTION_INPUT_MAX_CHARS", 40000),
+        extraction_max_turns=_int_env("IRIS_EXTRACTION_MAX_TURNS", 2),
+        extraction_timeout_seconds=_int_env("IRIS_EXTRACTION_TIMEOUT_SECONDS", 180),
+        memory_concurrency=_int_env("IRIS_MEMORY_CONCURRENCY", 1),
+        fact_context_max_chars=_int_env("IRIS_FACT_CONTEXT_MAX_CHARS", 4000),
     )

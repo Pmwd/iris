@@ -1,4 +1,4 @@
-"""Read-only report of context recommendations and actual run manifests.
+"""Read-only report of Iris session turns, summaries, and fact injection.
 
 Usage:
     .\\.venv\\Scripts\\python.exe scripts\\context_report.py --db data/iris.db
@@ -24,7 +24,7 @@ def _loads(value: str | None) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Summarize Iris context usage")
+    parser = argparse.ArgumentParser(description="Summarize Iris session memory usage")
     parser.add_argument("--db", type=Path, default=Path("data/iris.db"))
     args = parser.parse_args()
     if not args.db.is_file():
@@ -34,90 +34,97 @@ def main() -> int:
     conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row
     try:
-        runs = conn.execute(
+        turns = conn.execute(
             """
-            SELECT r.id, r.status, r.created_at, r.permission_profile,
-                   r.context_manifest_json, r.result_text,
-                   t.title AS task_title, p.name AS project_name
-            FROM runs r
-            JOIN tasks t ON t.id = r.task_id
-            JOIN projects p ON p.id = t.project_id
-            ORDER BY r.created_at DESC
+            SELECT t.id, t.seq, t.status, t.mode, t.permission_profile,
+                   t.context_manifest_json, t.created_at,
+                   s.title AS session_title, s.role AS role,
+                   p.name AS workspace_name
+            FROM turns t
+            JOIN sessions s ON s.id = t.session_id
+            LEFT JOIN projects p ON p.id = s.project_id
+            ORDER BY t.created_at DESC
             """
         ).fetchall()
-        note_rows = conn.execute(
+        summaries = conn.execute(
             """
-            SELECT id, title, pinned, use_count, last_used_at, 'project' AS scope
-            FROM notes
-            UNION ALL
-            SELECT id, title, pinned, use_count, last_used_at, 'global' AS scope
-            FROM global_notes
+            SELECT status, kind, COUNT(*) AS n
+            FROM session_summaries
+            GROUP BY status, kind
+            """
+        ).fetchall()
+        facts = conn.execute(
+            """
+            SELECT id, title, scope, kind, status, pinned, use_count, last_used_at
+            FROM facts
+            ORDER BY use_count DESC, updated_at DESC
             """
         ).fetchall()
     finally:
         conn.close()
 
-    note_usage = {row["id"]: dict(row) for row in note_rows}
     reason_counts: Counter[str] = Counter()
     scope_counts: Counter[str] = Counter()
-    selection_counts: Counter[str] = Counter()
+    mode_counts: Counter[str] = Counter()
 
-    print("# Iris 上下文使用报告")
+    print("# Iris 会话与记忆报告")
     print()
     print(f"数据库：`{args.db}`")
-    print(f"运行数量：{len(runs)}")
+    print(f"Turn 数量：{len(turns)}")
     print()
-    print("| 项目 / 任务 | 运行 | 模式 | 实际注入 | 推荐差异 | 估算 tokens |")
-    print("|---|---|---|---|---|---|")
-    for run in runs:
-        manifest = _loads(run["context_manifest_json"])
-        included = manifest.get("included_notes") or []
-        recommended = set(manifest.get("recommended_note_ids") or [])
-        included_ids = {note.get("id") for note in included}
-        mode = manifest.get("selection_mode") or "phase1"
-        selection_counts[mode] += 1
-        added = len(included_ids - recommended) if recommended else 0
-        removed = len(recommended - included_ids) if recommended else 0
-        diff = []
-        if added:
-            diff.append(f"+{added}")
-        if removed:
-            diff.append(f"-{removed}")
-        labels = []
-        for note in included:
-            scope = note.get("scope", "project")
-            reason = note.get("reason") or "—"
-            scope_counts[scope] += 1
-            reason_counts[reason] += 1
-            labels.append(f"{note.get('title')} [{scope}/{reason}]")
-        tokens = manifest.get("estimated_tokens") or manifest.get("recommended_tokens") or "—"
-        task_label = f"{run['project_name']} / {run['task_title']}"
-        print(
-            f"| {task_label} | {run['status']} `{run['created_at'][:16]}` | "
-            f"{mode} | {'<br>'.join(labels) if labels else '—'} | "
-            f"{' '.join(diff) or '—'} | {tokens} |"
-        )
+
+    if turns:
+        print("| 会话 / 工作区 | 角色 | # | 模式 | 状态 | 注入事实 | Summary | Tokens |")
+        print("|---|---|---|---|---|---|---|---|")
+        for turn in turns:
+            manifest = _loads(turn["context_manifest_json"])
+            mode = turn["mode"]
+            mode_counts[mode] += 1
+            labels = []
+            for fact in manifest.get("included_facts") or []:
+                scope = fact.get("scope", "global")
+                reason = fact.get("reason") or "—"
+                scope_counts[scope] += 1
+                reason_counts[reason] += 1
+                labels.append(f"{fact.get('title')} [{scope}/{reason}]")
+            workspace = turn["workspace_name"] or "无工作区"
+            session_label = f"{turn['session_title']} / {workspace}"
+            tokens = manifest.get("estimated_tokens") or "—"
+            print(
+                f"| {session_label} | {turn['role']} | {turn['seq']} | "
+                f"{mode} | {turn['status']} | "
+                f"{'<br>'.join(labels) if labels else '—'} | "
+                f"{'是' if manifest.get('summary_included') else '否'} | {tokens} |"
+            )
+    else:
+        print("尚无 Session Turn。")
 
     print()
     print("## 汇总")
     print()
-    print(f"- selection mode：{dict(selection_counts)}")
-    print(f"- scope 使用：{dict(scope_counts)}")
-    print(f"- reason 使用：{dict(reason_counts)}")
+    print(f"- Turn 模式：{dict(mode_counts)}")
+    print(f"- 注入事实 scope：{dict(scope_counts)}")
+    print(f"- 注入 reason：{dict(reason_counts)}")
+    print("- 摘要状态：" + (
+        ", ".join(
+            f"{row['status']}/{row['kind']}={row['n']}" for row in summaries
+        )
+        or "无"
+    ))
     print()
-    print("## Note 使用次数")
+
+    print("## 事实使用次数")
     print()
-    print("| Note | scope | 使用次数 | 最近使用 | 置顶 |")
-    print("|---|---|---|---|---|")
-    for note_id, item in sorted(
-        note_usage.items(), key=lambda pair: -(pair[1].get("use_count") or 0)
-    ):
-        if not item.get("use_count"):
-            continue
+    if not facts:
+        print("尚无长期事实。")
+        return 0
+    print("| 事实 | scope | kind | 状态 | 使用次数 | 最近使用 | 置顶 |")
+    print("|---|---|---|---|---|---|---|")
+    for fact in facts:
         print(
-            f"| {item['title']} | {item.get('scope', 'project')} | "
-            f"{item['use_count']} | {item.get('last_used_at') or '—'} | "
-            f"{'是' if item.get('pinned') else '否'} |"
+            f"| {fact['title']} | {fact['scope']} | {fact['kind']} | "
+            f"{fact['status']} | {fact['use_count']} | "
+            f"{fact['last_used_at'] or '—'} | {'是' if fact['pinned'] else '否'} |"
         )
     return 0
 

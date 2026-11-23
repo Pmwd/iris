@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -52,7 +53,53 @@ def main() -> int:
         print(json.dumps(payload, ensure_ascii=False), flush=True)
 
     if args.output_format == "json":
-        if "Break the research goal" in prompt or "Return only a JSON object" in prompt:
+        if "Extract durable long-term facts" in prompt or "EXTRACT_FACTS" in prompt:
+            if "EXTRACT_INVALID" in prompt:
+                result = "this is not json"
+            else:
+                if "SLOW_EXTRACT" in prompt:
+                    time.sleep(2)
+                match = re.search(r"session_id=([0-9a-fA-F-]+)", prompt)
+                source = match.group(1) if match else "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+                result = json.dumps(
+                    {
+                        "candidates": [
+                            {
+                                "kind": "preference",
+                                "scope": "global",
+                                "role": "both",
+                                "title": "Fake durable preference",
+                                "content_md": "The user prefers deterministic tests.",
+                                "evidence_md": "Stated in the session.",
+                                "source_session_ids": [source],
+                                "confidence": 0.9,
+                                "action": "new",
+                            }
+                        ]
+                    }
+                )
+        elif "Summarize this Iris session" in prompt or "SUMMARIZE_SESSION" in prompt:
+            if "SUMMARY_FAIL" in prompt:
+                emit(
+                    {
+                        "is_error": True,
+                        "result": "FAKE_SUMMARY_ERROR",
+                        "session_id": session,
+                        "subtype": "error",
+                        "terminal_reason": "api_error",
+                        "api_error_status": 500,
+                    }
+                )
+                return 1
+            result = (
+                "## Goal\nFake session summary.\n\n"
+                "## Completed\nFake work done.\n\n"
+                "## Key decisions\nFake decision.\n\n"
+                "## Open questions\nFake question.\n\n"
+                "## Artifacts and files\nfake_output.txt\n\n"
+                "## Failures and lessons\nNone."
+            )
+        elif "Break the research goal" in prompt or "Return only a JSON object" in prompt:
             result = json.dumps(
                 {
                     "questions": [
@@ -100,6 +147,24 @@ def main() -> int:
             "mcp_servers": [],
         }
     )
+
+    if "SESSION_LOST" in prompt and args.resume:
+        emit(
+            {
+                "type": "result",
+                "subtype": "error",
+                "is_error": True,
+                "result": "No conversation found with that session id.",
+                "session_id": session,
+                "num_turns": 1,
+                "total_cost_usd": 0,
+                "usage": {},
+                "permission_denials": [],
+                "terminal_reason": "api_error",
+                "api_error_status": 404,
+            }
+        )
+        return 1
 
     if "FLAKY" in prompt:
         marker = Path("fake_flaky_count.txt")

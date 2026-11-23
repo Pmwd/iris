@@ -120,22 +120,22 @@ def main() -> int:
             base_url=f"http://127.0.0.1:{PORT}", headers=HEADERS, timeout=30
         )
         project = client.post(
-            "/api/projects",
+            "/api/workspaces",
             json={
                 "name": "Crash test",
                 "workspace_path": str(workspace),
                 "allowed_tools": ["PowerShell(python *)"],
             },
         ).json()
-        task = client.post(
-            f"/api/projects/{project['id']}/tasks",
-            json={"title": "Long run", "goal_md": "SLEEP for a while"},
+        session = client.post(
+            "/api/sessions",
+            json={"role": "coding", "project_id": project["id"]},
         ).json()
-        run = client.post(
-            f"/api/tasks/{task['id']}/runs",
-            json={"mode": "new", "permission_profile": "execute"},
+        sent = client.post(
+            f"/api/sessions/{session['id']}/messages",
+            json={"content": "SLEEP for a while", "permission_profile": "edit"},
         ).json()
-        run_id = run["id"]
+        turn_id = sent["turn"]["id"]
         child_file = workspace / "fake_child.pid"
         deadline = time.time() + 15
         while time.time() < deadline and not child_file.exists():
@@ -143,7 +143,7 @@ def main() -> int:
         if not child_file.exists():
             raise RuntimeError("fake CLI did not start its child")
         child_pid = int(child_file.read_text(encoding="utf-8"))
-        print(f"backend_pid={backend.pid} run_id={run_id} child_pid={child_pid}")
+        print(f"backend_pid={backend.pid} turn_id={turn_id} child_pid={child_pid}")
 
         # Kill only the backend, not its process tree. The Job Object should
         # close with the server and kill the CLI and its descendant.
@@ -156,11 +156,11 @@ def main() -> int:
 
         restarted = start_backend(data_dir)
         latest = httpx.get(
-            f"http://127.0.0.1:{PORT}/api/runs/{run_id}", timeout=30
+            f"http://127.0.0.1:{PORT}/api/turns/{turn_id}", timeout=30
         ).json()
-        print(f"run_after_restart={latest['status']}")
+        print(f"turn_after_restart={latest['status']}")
         if latest["status"] != "interrupted":
-            raise AssertionError("run was not reconciled to interrupted")
+            raise AssertionError("turn was not reconciled to interrupted")
         print("backend restart reconciliation: OK")
         return 0
     finally:

@@ -1,44 +1,31 @@
-import { Link, Route, Routes } from "react-router-dom";
-import { ProjectPage } from "./pages/ProjectPage";
-import { ProjectsPage } from "./pages/ProjectsPage";
-import { TaskPage } from "./pages/TaskPage";
+import { Navigate, Route, Routes } from "react-router-dom";
+import { AppShell } from "./components/AppShell";
+import { MemoryPage } from "./pages/MemoryPage";
+import { RoleHome } from "./pages/RoleHome";
+import { SessionPage } from "./pages/SessionPage";
+import { WorkspaceDetailPage } from "./pages/WorkspaceDetailPage";
+import { WorkspacesPage } from "./pages/WorkspacesPage";
 
 export function App() {
   return (
-    <div className="app-shell">
-      <header className="app-header">
-        <Link className="brand" to="/">
-          <span className="brand-mark">◒</span>
-          <span>
-            Iris
-            <small>local workbench</small>
-          </span>
-        </Link>
-        <nav>
-          <Link to="/">项目</Link>
-        </nav>
-      </header>
-      <main>
-        <Routes>
-          <Route path="/" element={<ProjectsPage />} />
-          <Route path="/projects/:projectId" element={<ProjectPage />} />
-          <Route
-            path="/projects/:projectId/tasks/:taskId"
-            element={<TaskPage />}
-          />
-          <Route
-            path="*"
-            element={
-              <div className="page">
-                <div className="empty">页面不存在。</div>
-              </div>
-            }
-          />
-        </Routes>
-      </main>
-      <footer className="app-footer">
-        Iris · 本地优先 · 结果需要审查后才会成为上下文
-      </footer>
-    </div>
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route path="/" element={<Navigate to="/coding" replace />} />
+        <Route path="/memory" element={<MemoryPage />} />
+        <Route path="/workspaces" element={<WorkspacesPage />} />
+        <Route path="/workspaces/:workspaceId" element={<WorkspaceDetailPage />} />
+        <Route path="/:role" element={<RoleHome />} />
+        <Route path="/:role/:sessionId" element={<SessionPage />} />
+        <Route
+          path="*"
+          element={
+            <div className="page-empty">
+              <h2>页面不存在</h2>
+              <p className="muted">检查地址，或从左侧选择一个角色。</p>
+            </div>
+          }
+        />
+      </Route>
+    </Routes>
   );
 }

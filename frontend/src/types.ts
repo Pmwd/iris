@@ -1,13 +1,7 @@
-export type TaskStatus =
-  | "ready"
-  | "running"
-  | "needs_review"
-  | "interrupted"
-  | "failed"
-  | "canceled"
-  | "done";
-
-export type RunStatus =
+export type RoleId = "coding" | "scholar";
+export type PermissionProfile = "read_only" | "edit" | "execute" | "research";
+export type SessionStatus = "active" | "ended" | "archived";
+export type TurnStatus =
   | "starting"
   | "running"
   | "canceling"
@@ -15,25 +9,19 @@ export type RunStatus =
   | "failed"
   | "canceled"
   | "interrupted";
+export type FactScope = "global" | "workspace";
+export type FactRole = RoleId | "both";
+export type FactKind =
+  | "preference"
+  | "decision"
+  | "constraint"
+  | "artifact"
+  | "insight"
+  | "open_question"
+  | "profile";
+export type FactStatus = "candidate" | "accepted" | "rejected" | "archived";
 
-export type PermissionProfile =
-  | "read_only"
-  | "edit"
-  | "execute"
-  | "verify"
-  | "research";
-export type TaskRole = "coding" | "scholar" | "mentor" | "testing";
-export type ResearchStatus =
-  | "planning"
-  | "planned"
-  | "running"
-  | "canceling"
-  | "completed"
-  | "failed"
-  | "canceled"
-  | "interrupted";
-
-export interface Project {
+export interface Workspace {
   id: string;
   name: string;
   workspace_path: string;
@@ -43,49 +31,70 @@ export interface Project {
   created_at: string;
   updated_at: string;
   archived_at: string | null;
+  security_warnings?: string[];
+  session_count?: number;
 }
 
-export interface Task {
+export interface Session {
   id: string;
-  project_id: string;
+  role: RoleId;
   title: string;
-  goal_md: string;
-  role: TaskRole;
-  source_task_id: string | null;
-  status: TaskStatus;
-  current_session_id: string | null;
+  project_id: string | null;
+  status: SessionStatus;
+  cli_session_id: string | null;
+  cli_session_confirmed: boolean;
+  summary_covers_turn_seq: number;
   created_at: string;
   updated_at: string;
+  ended_at: string | null;
+  workspace?: Workspace | null;
+  latest_summary?: Summary | null;
+  active_turn?: Turn | null;
+  turn_count?: number;
 }
 
-export interface ContextManifest {
+export interface PromptManifest {
   prompt_version?: string;
+  role?: RoleId;
+  mode?: "new" | "resume";
   budget_chars?: number;
+  fact_budget_chars?: number;
   total_chars?: number;
-  available_note_count?: number;
-  included_notes?: Array<{
+  estimated_tokens?: number;
+  included_facts?: Array<{
     id: string;
     title: string;
-    scope?: "project" | "global";
+    scope: FactScope;
+    kind: FactKind;
     chars: number;
     reason?: string | null;
-    updated_at: string;
   }>;
-  excluded_notes?: Array<{ id: string; title: string; reason: string }>;
-  mentor_state_note_count?: number;
+  excluded_facts?: Array<{
+    id: string;
+    title: string;
+    scope: FactScope;
+    reason: string;
+  }>;
+  summary_included?: boolean;
+  summary_chars?: number;
+  user_message_chars?: number;
+  fact_selection?: "auto" | "manual";
+  [key: string]: unknown;
 }
 
-export interface Run {
+export interface Turn {
   id: string;
-  task_id: string;
-  attempt_no: number;
-  status: RunStatus;
-  cli_session_id: string | null;
+  session_id: string;
+  seq: number;
+  role: RoleId;
+  project_id: string | null;
+  status: TurnStatus;
+  mode: "new" | "resume";
   permission_profile: PermissionProfile;
-  prompt_version: string;
-  workspace_path: string;
-  context_manifest: ContextManifest;
+  cli_session_id: string | null;
+  prompt_manifest: PromptManifest;
   pid: number | null;
+  raw_log_path: string | null;
   started_at: string | null;
   ended_at: string | null;
   exit_code: number | null;
@@ -97,119 +106,95 @@ export interface Run {
   created_at: string;
 }
 
-export interface RunEvent {
-  id: number;
-  run_id: string;
+export interface Message {
+  id: string;
+  session_id: string;
+  turn_id: string | null;
   seq: number;
-  kind: string;
+  role: "user" | "assistant" | "system";
+  kind: "text" | "result" | "error";
+  content: string;
+  payload: Record<string, unknown>;
   created_at: string;
-  payload: unknown;
-  truncated: number;
 }
 
-export interface Note {
+export interface TurnEvent {
+  id: number;
+  turn_id: string;
+  seq: number;
+  kind: string;
+  payload: unknown;
+  truncated: number;
+  created_at: string;
+}
+
+export interface Summary {
   id: string;
-  project_id?: string;
-  task_id?: string | null;
-  source_run_id?: string | null;
-  kind:
-    | "outcome"
-    | "decision"
-    | "note"
-    | "research"
-    | "goal"
-    | "capability"
-    | "blind_spot"
-    | "progress";
-  status: "draft" | "accepted" | "archived";
+  session_id: string;
+  kind: "auto" | "final" | "manual" | "compact";
+  status: "pending" | "running" | "succeeded" | "failed";
+  covers_through_turn_seq: number;
+  content_md: string;
+  model: string | null;
+  cost_usd: number | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface Fact {
+  id: string;
+  scope: FactScope;
+  project_id: string | null;
+  role: FactRole;
+  kind: FactKind;
+  status: FactStatus;
   title: string;
   content_md: string;
   aliases: string[];
   pinned: boolean;
-  use_count?: number;
-  last_used_at?: string | null;
-  scope?: "project" | "global";
+  use_count: number;
+  last_used_at: string | null;
+  source_session_ids: string[];
+  evidence_md: string;
+  confidence: number | null;
+  supersedes_id: string | null;
+  extracted_at: string | null;
+  reviewed_at: string | null;
   created_at: string;
   updated_at: string;
-  accepted_at: string | null;
 }
 
-export interface ContextNote extends Note {
-  scope: "project" | "global";
-  recommended: boolean;
-  reason:
-    | "pinned"
-    | "matched"
-    | "recent"
-    | "handoff"
-    | "mentor_state"
-    | "budget"
-    | "not_relevant";
-  score: number;
-  matched: boolean;
-  handoff?: boolean;
-  search_rank: number | null;
+export interface Extraction {
+  id: string;
+  status: "running" | "succeeded" | "failed";
+  scope: {
+    role?: RoleId | null;
+    project_id?: string | null;
+    session_ids?: string[];
+    max_sessions?: number;
+  };
+  candidate_count: number;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  ended_at: string | null;
 }
 
 export interface Role {
-  id: TaskRole;
+  id: RoleId;
   name: string;
   description: string;
   default_profile: PermissionProfile;
   allowed_profiles: PermissionProfile[];
+  requires_workspace: boolean;
 }
 
-export interface ResearchSubtask {
-  id: string;
-  job_id: string;
-  seq: number;
-  question: string;
-  status: "queued" | "running" | "succeeded" | "failed" | "canceled" | "interrupted";
-  result_text: string | null;
-  sources: string[];
-  attempts: number;
-  error: string | null;
-  started_at: string | null;
-  ended_at: string | null;
-}
-
-export interface ResearchJob {
-  id: string;
-  task_id: string;
-  status: ResearchStatus;
-  allow_web: boolean;
-  max_concurrency: number;
-  plan: string[];
-  synthesis_note_id: string | null;
-  error: string | null;
-  created_at: string;
-  started_at: string | null;
-  ended_at: string | null;
-  subtasks: ResearchSubtask[];
-}
-
-export interface ContextPreview {
-  task_id: string;
-  project_id: string;
-  role: TaskRole;
-  source_task_id: string | null;
-  project_brief: string;
-  budget_chars: number;
-  budget_tokens: number;
-  estimated_tokens: number;
-  selected_chars: number;
-  query_terms: string[];
-  notes: ContextNote[];
-  selected_note_ids: string[];
-  execute_allowed: boolean;
-  security_warnings: string[];
-}
-
-export interface BackupInfo {
-  name: string;
-  path: string;
-  size: number;
-  created_at: string;
+export interface SummaryResponse {
+  summary: Summary | null;
+  active: Summary | null;
+  items: Summary[];
 }
 
 export interface Health {
@@ -217,7 +202,7 @@ export interface Health {
   data_dir: string;
   db_path: string;
   host: string;
-  project_count?: number;
+  workspace_count?: number;
   cli: {
     installed: boolean;
     version: string | null;
@@ -225,4 +210,11 @@ export interface Health {
     auth_method: string | null;
     api_provider: string | null;
   };
+}
+
+export interface BackupInfo {
+  name: string;
+  path: string;
+  size: number;
+  created_at: string;
 }
