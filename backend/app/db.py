@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
+from .text import build_search_text, normalize_fingerprint
+
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
@@ -15,7 +17,7 @@ def utcnow() -> str:
 
 
 class Database:
-    SCHEMA_VERSION = 9
+    SCHEMA_VERSION = 10
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
@@ -57,6 +59,8 @@ class Database:
                 self._migrate_v8(conn)
             if version < 9:
                 self._migrate_v9(conn)
+            if version < 10:
+                self._migrate_v10(conn)
             conn.execute(f"PRAGMA user_version = {self.SCHEMA_VERSION}")
         finally:
             conn.close()
@@ -129,6 +133,115 @@ class Database:
         # data and can be rebuilt at any time.
         self._setup_fts(conn)
 
+    def _migrate_v10(self, conn: sqlite3.Connection) -> None:
+        """Memory 2.0: provenance, validity, pre-tokenized FTS, auto-capture."""
+        fact_additions = {
+            "tags_json": "TEXT NOT NULL DEFAULT '[]'",
+            "origin": "TEXT NOT NULL DEFAULT 'manual'",
+            "extraction_id": "TEXT",
+            "source_turn_id": "TEXT",
+            "valid_until": "TEXT",
+            "last_confirmed_at": "TEXT",
+            "superseded_by_id": "TEXT",
+            "merged_into_id": "TEXT",
+            "fingerprint": "TEXT",
+            "search_text": "TEXT NOT NULL DEFAULT ''",
+        }
+        columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(facts)").fetchall()
+        }
+        for name, definition in fact_additions.items():
+            if name not in columns:
+                conn.execute(f"ALTER TABLE facts ADD COLUMN {name} {definition}")
+
+        extraction_additions = {
+            "trigger": "TEXT NOT NULL DEFAULT 'manual'",
+            "source_session_id": "TEXT",
+            "source_summary_id": "TEXT",
+        }
+        extraction_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(fact_extractions)").fetchall()
+        }
+        for name, definition in extraction_additions.items():
+            if name not in extraction_columns:
+                conn.execute(
+                    f"ALTER TABLE fact_extractions ADD COLUMN {name} {definition}"
+                )
+
+        for statement in (
+            "CREATE INDEX IF NOT EXISTS idx_facts_fingerprint ON facts(fingerprint)",
+            "CREATE INDEX IF NOT EXISTS idx_facts_review ON facts(status, reviewed_at, updated_at)",
+            "CREATE INDEX IF NOT EXISTS idx_facts_validity ON facts(status, valid_until)",
+            "CREATE INDEX IF NOT EXISTS idx_facts_extraction ON facts(extraction_id)",
+            "CREATE INDEX IF NOT EXISTS idx_facts_source_turn ON facts(source_turn_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_fact_extractions_summary "
+            "ON fact_extractions(source_summary_id) "
+            "WHERE source_summary_id IS NOT NULL AND trigger = 'session_end'",
+        ):
+            conn.execute(statement)
+
+        rows = conn.execute("SELECT * FROM facts").fetchall()
+        for row in rows:
+            data = dict(row)
+            aliases = data.get("aliases_json") or "[]"
+            try:
+                alias_list = json.loads(aliases)
+            except (json.JSONDecodeError, TypeError):
+                alias_list = []
+            tags = data.get("tags_json") or "[]"
+            try:
+                tag_list = json.loads(tags)
+            except (json.JSONDecodeError, TypeError):
+                tag_list = []
+            fingerprint = normalize_fingerprint(
+                data.get("title") or "",
+                data.get("kind") or "",
+                data.get("scope") or "",
+                data.get("project_id"),
+            )
+            search_text = build_search_text(
+                data.get("title") or "",
+                data.get("content_md") or "",
+                alias_list,
+                tag_list,
+            )
+            origin = data.get("origin") or "manual"
+            if origin == "manual" and data.get("extracted_at"):
+                origin = "extraction"
+            last_confirmed = data.get("last_confirmed_at")
+            if not last_confirmed and data.get("status") == "accepted":
+                last_confirmed = data.get("reviewed_at") or data.get("updated_at")
+            superseded_by = conn.execute(
+                """
+                SELECT id FROM facts
+                WHERE supersedes_id = ? AND id != ?
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (data["id"], data["id"]),
+            ).fetchone()
+            conn.execute(
+                """
+                UPDATE facts
+                SET fingerprint = ?, search_text = ?, origin = ?,
+                    last_confirmed_at = ?, superseded_by_id = ?
+                WHERE id = ?
+                """,
+                (
+                    fingerprint,
+                    search_text,
+                    origin,
+                    last_confirmed,
+                    superseded_by[0] if superseded_by else None,
+                    data["id"],
+                ),
+            )
+
+        # The v9 FTS schema indexed raw text with the default tokenizer. Rebuild
+        # it with the shared pre-tokenized representation.
+        conn.execute("DROP TABLE IF EXISTS facts_fts")
+        self._setup_fts(conn)
+
     def _setup_fts(
         self, conn: sqlite3.Connection, force_rebuild: bool = False
     ) -> None:
@@ -154,7 +267,7 @@ class Database:
             conn.execute(
                 """
                 CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts
-                USING fts5(fact_id UNINDEXED, title, content)
+                USING fts5(fact_id UNINDEXED, search_text)
                 """
             )
             self.fts_enabled = True
@@ -197,20 +310,14 @@ class Database:
             if rebuild_facts:
                 conn.execute("DELETE FROM facts_fts")
                 for row in conn.execute(
-                    "SELECT id, title, content_md, aliases_json FROM facts"
+                    "SELECT id, search_text FROM facts"
                 ).fetchall():
-                    aliases = json.loads(row[3] or "[]")
-                    alias_text = " ".join(str(alias) for alias in aliases)
                     conn.execute(
                         """
-                        INSERT INTO facts_fts(fact_id, title, content)
-                        VALUES (?, ?, ?)
+                        INSERT INTO facts_fts(fact_id, search_text)
+                        VALUES (?, ?)
                         """,
-                        (
-                            row[0],
-                            row[1],
-                            row[2] + ("\n" + alias_text if alias_text else ""),
-                        ),
+                        (row[0], row[1] or ""),
                     )
         except sqlite3.OperationalError:
             self.fts_enabled = False

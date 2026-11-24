@@ -1,23 +1,31 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api";
 import { errorText, formatTime } from "../format";
 import {
   FACT_KIND_LABELS,
+  FACT_ORIGIN_LABELS,
+  FACT_RELATION_LABELS,
   FACT_ROLE_LABELS,
   FACT_SCOPE_LABELS,
+  sessionPath,
 } from "../labels";
-import type { Fact, Workspace } from "../types";
+import type { MemoryInboxGroup, Fact, Session, Workspace } from "../types";
 import { MarkdownMessage } from "./MarkdownMessage";
 import { StatusBadge } from "./StatusBadge";
 
 export function FactCard({
   fact,
   workspaces,
+  sessions = [],
+  relationGroup,
   onChanged,
   onEdit,
 }: {
   fact: Fact;
   workspaces: Workspace[];
+  sessions?: Session[];
+  relationGroup?: MemoryInboxGroup;
   onChanged: () => void;
   onEdit: (fact: Fact) => void;
 }) {
@@ -42,6 +50,37 @@ export function FactCard({
     setError(null);
     try {
       await api.archiveFact(fact.id);
+      onChanged();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function merge(mode: "merge" | "supersede" | "keep_both") {
+    const target = relationGroup?.target_fact;
+    if (!target) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.mergeFact(fact.id, {
+        target_fact_id: target.id,
+        mode,
+      });
+      onChanged();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirm() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.confirmFact(fact.id);
       onChanged();
     } catch (err) {
       setError(errorText(err));
@@ -76,15 +115,100 @@ export function FactCard({
             {workspaceName ? ` · ${workspaceName}` : ""}
           </span>
           <span className="pill">{FACT_ROLE_LABELS[fact.role]}</span>
+          <span className="pill">{FACT_ORIGIN_LABELS[fact.origin] ?? fact.origin}</span>
           {fact.confidence !== null ? (
             <span className="pill">{Math.round(fact.confidence * 100)}%</span>
           ) : null}
+          {fact.tags.map((tag) => (
+            <span className="pill tag-pill" key={tag}>
+              #{tag}
+            </span>
+          ))}
         </div>
       </div>
+
+      {relationGroup?.target_fact ? (
+        <div className="fact-relation-banner">
+          <div>
+            <strong>
+              {FACT_RELATION_LABELS[relationGroup.kind] ?? relationGroup.kind}
+            </strong>
+            <span className="muted">
+              {" "}
+              与「{relationGroup.target_fact.title}」相似{" "}
+              {Math.round(relationGroup.score * 100)}%
+            </span>
+          </div>
+          <div className="inline-actions">
+            <button
+              type="button"
+              className="button small"
+              onClick={() => void merge("merge")}
+              disabled={busy}
+            >
+              合并
+            </button>
+            <button
+              type="button"
+              className="button small ghost"
+              onClick={() => void merge("supersede")}
+              disabled={busy}
+            >
+              取代
+            </button>
+            <button
+              type="button"
+              className="button small ghost"
+              onClick={() => void merge("keep_both")}
+              disabled={busy}
+            >
+              都保留
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div className="fact-content">
         <MarkdownMessage content={fact.content_md} />
       </div>
+
+      {fact.source_session_ids.length ? (
+        <div className="fact-sources">
+          来源：
+          {fact.source_session_ids.map((sessionId) => {
+            const source = sessions.find((item) => item.id === sessionId);
+            return source ? (
+              <Link
+                key={sessionId}
+                to={sessionPath(source.role, source.id)}
+                className="source-link"
+              >
+                {source.title || sessionId.slice(0, 8)}
+              </Link>
+            ) : (
+              <span key={sessionId} className="muted">
+                {sessionId.slice(0, 8)}
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {fact.valid_until ? (
+        <div className="fact-note">
+          有效期至 {formatTime(fact.valid_until)}
+          {fact.status === "accepted" ? (
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => void confirm()}
+              disabled={busy}
+            >
+              仍然有效
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {fact.supersedes_id ? (
         <div className="fact-note">

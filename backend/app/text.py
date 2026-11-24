@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import re
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[一-鿿]+")
@@ -59,12 +60,12 @@ FUNCTION_CHARS = set(
 )
 
 
-def query_terms(text: str, limit: int = 32) -> list[str]:
+def search_tokens(text: str, limit: int = 2000) -> list[str]:
     """Tokenize English words and Chinese bigrams for local retrieval.
 
-    FTS5's default tokenizer does not segment Chinese phrases well, so we
-    generate overlapping bigrams for Han runs. The LIKE fallback then finds
-    phrases such as 全身 in 全身锻炼 even when FTS5 does not.
+    FTS5's default tokenizer does not segment Chinese phrases well, so we use
+    the same overlapping bigrams both when indexing and when querying. Keeping
+    one tokenizer for both sides is what makes CJK FTS matching reliable.
     """
     terms: list[str] = []
     for raw in TOKEN_RE.findall(text or ""):
@@ -88,3 +89,55 @@ def query_terms(text: str, limit: int = 32) -> list[str]:
         ):
             terms.append(token)
     return list(dict.fromkeys(terms))[:limit]
+
+
+def query_terms(text: str, limit: int = 32) -> list[str]:
+    return search_tokens(text, limit=limit)
+
+
+def build_search_text(*parts: object) -> str:
+    """Build the pre-tokenized text stored in ``facts.search_text``.
+
+    Parts may be strings or lists of strings (aliases/tags). Deduplication
+    keeps the FTS index compact while preserving term coverage.
+    """
+    tokens: list[str] = []
+    for part in parts:
+        if part is None:
+            continue
+        if isinstance(part, (list, tuple, set)):
+            for item in part:
+                tokens.extend(search_tokens(str(item), limit=500))
+        else:
+            tokens.extend(search_tokens(str(part), limit=1000))
+    return " ".join(dict.fromkeys(tokens))
+
+
+def normalize_for_match(text: str) -> str:
+    lowered = (text or "").strip().lower()
+    cleaned = re.sub(r"[^\w㐀-鿿]+", " ", lowered)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def normalize_fingerprint(
+    title: str, kind: str, scope: str, project_id: str | None
+) -> str:
+    return (
+        f"{kind}|{scope}|{project_id or ''}|{normalize_for_match(title)}"
+    )
+
+
+def title_similarity(left: str, right: str) -> float:
+    a = normalize_for_match(left)
+    b = normalize_for_match(right)
+    if not a or not b:
+        return 0.0
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def token_jaccard(left: str, right: str) -> float:
+    a = set(search_tokens(left, limit=500))
+    b = set(search_tokens(right, limit=500))
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)

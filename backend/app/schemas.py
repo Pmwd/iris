@@ -61,7 +61,9 @@ class FactCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     content_md: str = ""
     aliases: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     pinned: bool = False
+    valid_until: str | None = None
 
 
 class FactUpdate(BaseModel):
@@ -73,7 +75,34 @@ class FactUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     content_md: str | None = None
     aliases: list[str] | None = None
+    tags: list[str] | None = None
     pinned: bool | None = None
+    valid_until: str | None = None
+
+
+class FactRemember(BaseModel):
+    text: str = Field(min_length=1, max_length=20000)
+    title: str = Field(default="", max_length=200)
+    scope: FactScope = "global"
+    project_id: str | None = None
+    role: FactRole = "both"
+    kind: FactKind = "insight"
+    aliases: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    source_session_id: str | None = None
+    source_turn_id: str | None = None
+    valid_until: str | None = None
+    accept: bool = True
+
+
+class FactMerge(BaseModel):
+    target_fact_id: str = Field(min_length=1)
+    mode: Literal["merge", "supersede", "keep_both"] = "merge"
+    content_md: str | None = None
+
+
+class FactConfirm(BaseModel):
+    valid_until: str | None = None
 
 
 class FactExtractRequest(BaseModel):

@@ -1,0 +1,108 @@
+{
+  "facts": [
+    {
+      "key": "pnpm",
+      "scope": "workspace",
+      "project": "A",
+      "role": "coding",
+      "kind": "constraint",
+      "title": "构建使用 pnpm",
+      "content_md": "不要使用 npm；安装依赖和打包使用 pnpm。",
+      "aliases": ["打包", "npm", "安装依赖"],
+      "tags": ["tooling"]
+    },
+    {
+      "key": "exercise",
+      "scope": "global",
+      "role": "both",
+      "kind": "preference",
+      "title": "每周全身锻炼 3 次",
+      "content_md": "偏好晚上训练，每次 30 分钟。",
+      "aliases": ["健身", "训练"],
+      "tags": ["fitness"]
+    },
+    {
+      "key": "deploy_new",
+      "scope": "workspace",
+      "project": "A",
+      "role": "coding",
+      "kind": "artifact",
+      "title": "部署地址 new.example.com",
+      "content_md": "生产部署到 new.example.com。",
+      "aliases": ["上线", "线上地址"],
+      "tags": ["deployment", "infra"]
+    },
+    {
+      "key": "deploy_old",
+      "scope": "workspace",
+      "project": "A",
+      "role": "coding",
+      "kind": "artifact",
+      "title": "旧部署地址 old.example.com",
+      "content_md": "旧地址已废弃。",
+      "aliases": ["旧地址"],
+      "tags": ["deployment"],
+      "valid_until": "2000-01-01T00:00:00+00:00"
+    },
+    {
+      "key": "food",
+      "scope": "global",
+      "role": "both",
+      "kind": "preference",
+      "title": "饮食禁忌：芒果过敏",
+      "content_md": "对芒果严重过敏。",
+      "aliases": ["聚会", "安全"],
+      "tags": ["health"]
+    },
+    {
+      "key": "react",
+      "scope": "workspace",
+      "project": "B",
+      "role": "coding",
+      "kind": "decision",
+      "title": "前端使用 React",
+      "content_md": "工作区 B 的前端使用 React。",
+      "aliases": ["前端框架"],
+      "tags": ["frontend"]
+    },
+    {
+      "key": "sqlite",
+      "scope": "global",
+      "role": "coding",
+      "kind": "decision",
+      "title": "本地数据库使用 SQLite",
+      "content_md": "使用 SQLite + FTS5，不引入外部数据库。",
+      "aliases": ["数据库"],
+      "tags": ["database"]
+    },
+    {
+      "key": "graphql",
+      "scope": "workspace",
+      "project": "A",
+      "role": "coding",
+      "kind": "decision",
+      "title": "内部 API 保留 REST",
+      "content_md": "暂不迁移 GraphQL。",
+      "aliases": ["GraphQL"],
+      "tags": ["api"]
+    }
+  ],
+  "queries": [
+    {"id": "Q01", "q": "用什么打包", "role": "coding", "project": "A", "expect": ["pnpm"]},
+    {"id": "Q02", "q": "这周怎么练全身", "role": "both", "project": null, "expect": ["exercise"]},
+    {"id": "Q03", "q": "deployment target", "role": "coding", "project": "A", "expect": ["deploy_new"]},
+    {"id": "Q04", "q": "当前部署地址", "role": "coding", "project": "A", "expect": ["deploy_new"], "absent": ["deploy_old"]},
+    {"id": "Q05", "q": "聚会食物安全", "role": "both", "project": null, "expect": ["food"]},
+    {"id": "Q06", "q": "GIL 是什么", "role": "coding", "project": "A", "expect": []},
+    {"id": "Q07", "q": "前端框架", "role": "coding", "project": "B", "expect": ["react"]},
+    {"id": "Q08", "q": "前端框架", "role": "coding", "project": "A", "expect": []},
+    {"id": "Q09", "q": "数据库选型", "role": "coding", "project": null, "expect": ["sqlite"]},
+    {"id": "Q10", "q": "GraphQL", "role": "coding", "project": "A", "expect": ["graphql"]},
+    {"id": "Q11", "q": "npm", "role": "coding", "project": "A", "expect": ["pnpm"]},
+    {"id": "Q12", "q": "怎么构建", "role": "coding", "project": "A", "expect": ["pnpm"]},
+    {"id": "Q13", "q": "线上地址", "role": "coding", "project": "A", "expect": ["deploy_new"]},
+    {"id": "Q14", "q": "完全不相关的问题", "role": "coding", "project": "A", "expect": []},
+    {"id": "Q15", "q": "React", "role": "coding", "project": "A", "expect": []},
+    {"id": "Q16", "q": "旧部署地址", "role": "coding", "project": "A", "expect": ["deploy_new"], "absent": ["deploy_old"]}
+  ]
+}

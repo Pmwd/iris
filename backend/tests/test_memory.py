@@ -92,3 +92,42 @@ def test_end_triggers_final_summary(app_client):
     data = wait_for_summary(client, session["id"])
     assert data["summary"]["kind"] == "final"
     assert data["summary"]["covers_through_turn_seq"] == 1
+
+
+def test_final_summary_auto_captures_candidates(client_factory):
+    client, workspace, _app = client_factory(memory_auto_capture="session_end")
+    project = create_workspace(client, workspace)
+    session = create_session(client, project_id=project["id"])
+    send_and_wait(client, session["id"], "EDIT first", profile="edit")
+    ended = client.post(f"/api/sessions/{session['id']}/end", headers=HEADERS)
+    assert ended.status_code == 200
+    wait_for_summary(client, session["id"])
+
+    deadline = time.time() + 20
+    candidates = []
+    extractions = []
+    while time.time() < deadline:
+        candidates = client.get("/api/facts?status=candidate").json()
+        extractions = client.get("/api/fact-extractions").json()
+        if candidates and any(item["status"] == "succeeded" for item in extractions):
+            break
+        time.sleep(0.05)
+    assert candidates, "auto capture did not create candidates"
+    assert candidates[0]["origin"] == "extraction"
+    assert candidates[0]["extraction_id"]
+    assert candidates[0]["status"] == "candidate"
+    assert candidates[0]["source_session_ids"] == [session["id"]]
+    assert any(item["trigger"] == "session_end" for item in extractions)
+    assert client.get("/api/facts?status=accepted").json() == []
+
+
+def test_auto_capture_can_be_disabled(app_client):
+    client, workspace = app_client
+    project = create_workspace(client, workspace)
+    session = create_session(client, project_id=project["id"])
+    send_and_wait(client, session["id"], "EDIT first", profile="edit")
+    ended = client.post(f"/api/sessions/{session['id']}/end", headers=HEADERS)
+    assert ended.status_code == 200
+    wait_for_summary(client, session["id"])
+    time.sleep(0.3)
+    assert client.get("/api/facts?status=candidate").json() == []

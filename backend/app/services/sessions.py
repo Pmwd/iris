@@ -221,6 +221,8 @@ class SessionManager:
                     query=content,
                     budget_chars=self.settings.fact_context_max_chars,
                     explicit_ids=fact_ids,
+                    min_score=self.settings.fact_min_score,
+                    max_items=self.settings.fact_context_max_items,
                 )
             except FactSelectionError as exc:
                 raise TurnError(exc.message, exc.status_code) from exc

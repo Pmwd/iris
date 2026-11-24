@@ -4,7 +4,7 @@
 - 前置：Windows、Python 3.12、Node 20+、Claude Code CLI 已登录；建议使用独立 `IRIS_DATA_DIR`，避免污染现有数据。
 - 自动化基线：`pytest backend/tests -q` 通过（42 个测试）；`cd frontend && npm run build` 通过。
 - 默认执行后端为 `sdk`（`IRIS_EXECUTION_BACKEND=sdk`）；工具审批依赖 `ClaudeSDKClient` 的 streaming 模式与原生 `claude.exe`。
-- M0 的 T1–T6 验收矩阵与当前证据见 `docs/acceptance/m0-real-cli.md`；本文档提供详细手工步骤。
+- M0 的 T1–T9 验收矩阵与当前证据见 `docs/acceptance/m0-real-cli.md`；本文档提供 T1–T6 的详细手工步骤，T7–T9 记录见矩阵文档。
 
 ## 1. 启动
 

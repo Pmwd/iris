@@ -95,15 +95,17 @@ def build_turn_prompt(
     excluded: list[dict[str, Any]] = []
     for fact in fact_selection.get("facts") or []:
         if fact["id"] not in selected_ids:
-            if fact.get("reason") in {"budget", "not_relevant"}:
-                excluded.append(
-                    {
-                        "id": fact["id"],
-                        "title": fact.get("title"),
-                        "scope": fact.get("scope"),
-                        "reason": fact.get("reason"),
-                    }
-                )
+            excluded.append(
+                {
+                    "id": fact["id"],
+                    "title": fact.get("title"),
+                    "scope": fact.get("scope"),
+                    "reason": fact.get("reason"),
+                    "score": fact.get("score"),
+                }
+            )
+            if len(excluded) >= 50:
+                break
             continue
         section = _fact_section(fact)
         sections.append(section)
@@ -115,6 +117,10 @@ def build_turn_prompt(
                 "kind": fact.get("kind"),
                 "chars": len(section),
                 "reason": fact.get("reason"),
+                "score": fact.get("score"),
+                "score_parts": fact.get("score_parts"),
+                "source_session_ids": fact.get("source_session_ids") or [],
+                "source_turn_id": fact.get("source_turn_id"),
             }
         )
 
@@ -152,6 +158,14 @@ def build_turn_prompt(
         "summary_chars": len(summary_md or ""),
         "user_message_chars": len(user_message),
         "fact_selection": fact_selection.get("selection_mode", "auto"),
+        "selection": {
+            "abstained": bool(fact_selection.get("abstained")),
+            "abstain_reason": fact_selection.get("abstain_reason"),
+            "threshold": fact_selection.get("threshold"),
+            "candidate_count": fact_selection.get("candidate_count"),
+            "selected_count": fact_selection.get("selected_count"),
+            "top_score": fact_selection.get("top_score"),
+        },
     }
     return PromptPack(prompt=prompt, manifest=manifest)
 
@@ -171,9 +185,12 @@ def build_summary_prompt(
         "## Goal",
         "## Completed",
         "## Key decisions",
+        "## Preferences and constraints",
         "## Open questions",
         "## Artifacts and files",
         "## Failures and lessons",
+        "",
+        "Write the summary in the dominant language of the transcript.",
         "",
         f"Role: {session.get('role')}",
         f"Session title: {session.get('title')}",
@@ -209,7 +226,8 @@ def build_extraction_prompt(
         "Return ONLY a JSON object (no markdown fences) with this shape:",
         '{"candidates":[{"kind":"preference|decision|constraint|artifact|insight|open_question|profile",'
         '"scope":"global|workspace","role":"coding|scholar|both","title":"...",'
-        '"content_md":"...","evidence_md":"...","source_session_ids":["..."],'
+        '"content_md":"...","aliases":["..."],"tags":["..."],'
+        '"evidence_md":"...","source_session_ids":["..."],'
         '"confidence":0.0,"action":"new|update","target_fact_id":"..."}]}',
         "",
         "Rules:",
@@ -220,6 +238,7 @@ def build_extraction_prompt(
         "- If a candidate updates an existing accepted fact, use action=update and "
         "target_fact_id with that fact's id.",
         "- confidence is 0..1. Never treat a hypothesis as a fact.",
+        "- aliases are alternate user phrasings/keywords; tags are short topic labels.",
         "",
         f"Target role: {role}",
         f"Workspace: {workspace['workspace_path'] if workspace else '(none)'}",

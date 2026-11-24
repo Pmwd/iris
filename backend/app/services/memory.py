@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -9,15 +10,22 @@ from ..cli.oneshot import OneShotError, run_oneshot
 from ..config import Settings
 from ..db import utcnow
 from ..repository import Repository
-from ..repository_facts import FactRepository
+from ..repository_facts import FactRepository, normalize_fingerprint
 from ..repository_sessions import SessionRepository
-from .facts import ExtractionParseError, parse_extraction
+from .facts import (
+    FACT_KINDS,
+    FACT_ROLES,
+    FACT_SCOPES,
+    ExtractionParseError,
+    parse_extraction,
+)
 from .prompts import (
     EXTRACTION_SYSTEM,
     SUMMARY_SYSTEM,
     build_extraction_prompt,
     build_summary_prompt,
 )
+from .relations import find_relations
 
 logger = logging.getLogger("iris.memory")
 
@@ -50,6 +58,114 @@ class MemoryManager:
             max_workers=max(1, settings.memory_concurrency),
             thread_name_prefix="iris-memory",
         )
+
+    # ------------------------------------------------------------------
+    # Quick capture (human-triggered)
+    # ------------------------------------------------------------------
+    def remember(
+        self,
+        *,
+        text: str,
+        title: str,
+        scope: str,
+        project_id: str | None,
+        role: str,
+        kind: str,
+        aliases: list[str] | None = None,
+        tags: list[str] | None = None,
+        source_session_id: str | None = None,
+        source_turn_id: str | None = None,
+        valid_until: str | None = None,
+        accept: bool = True,
+    ) -> dict[str, Any]:
+        clean_text = (text or "").strip()
+        clean_title = (title or "").strip()
+        if not clean_title:
+            first = next(
+                (line.strip(" #-*>") for line in clean_text.splitlines() if line.strip()),
+                "",
+            )
+            clean_title = first[:200] or "一条记忆"
+        if not clean_text:
+            clean_text = clean_title
+        if scope not in FACT_SCOPES:
+            raise MemoryError("invalid fact scope", 422)
+        if scope == "workspace" and not project_id:
+            raise MemoryError("workspace facts require project_id", 422)
+        if role not in FACT_ROLES:
+            raise MemoryError("invalid fact role", 422)
+        if kind not in FACT_KINDS:
+            raise MemoryError("invalid fact kind", 422)
+
+        fingerprint = normalize_fingerprint(
+            clean_title, kind, scope, project_id if scope == "workspace" else None
+        )
+        existing = self.repo_facts.find_by_fingerprint(fingerprint)
+        if existing:
+            return {
+                "fact": existing,
+                "created": False,
+                "accepted": existing["status"] == "accepted",
+                "needs_review": False,
+                "relation": None,
+            }
+
+        if project_id:
+            targets = self.repo_facts.list_facts(
+                status="accepted",
+                project_id=project_id,
+                role=role if role in {"coding", "scholar"} else None,
+                include_global=True,
+                limit=500,
+            )
+        else:
+            targets = self.repo_facts.list_facts(
+                status="accepted",
+                scope="global",
+                role=role if role in {"coding", "scholar"} else None,
+                limit=500,
+            )
+        candidate = {
+            "id": None,
+            "title": clean_title,
+            "content_md": clean_text,
+            "kind": kind,
+            "scope": scope,
+            "project_id": project_id if scope == "workspace" else None,
+            "role": role,
+        }
+        relations = find_relations(candidate, targets, limit=3)
+        blocking = [
+            item
+            for item in relations
+            if item["relation"] in {"duplicate", "near_duplicate", "conflict"}
+        ]
+        needs_review = bool(blocking)
+        status = "candidate" if needs_review or not accept else "accepted"
+        source_ids = [source_session_id] if source_session_id else []
+        fact = self.repo_facts.create_fact(
+            scope=scope,
+            project_id=project_id if scope == "workspace" else None,
+            role=role,
+            kind=kind,
+            status=status,
+            title=clean_title,
+            content_md=clean_text,
+            aliases=aliases or [],
+            tags=tags or [],
+            origin="quick_capture",
+            source_turn_id=source_turn_id,
+            source_session_ids=source_ids,
+            evidence_md=(clean_text[:2000] if clean_text else ""),
+            valid_until=valid_until,
+        )
+        return {
+            "fact": fact,
+            "created": True,
+            "accepted": status == "accepted",
+            "needs_review": needs_review,
+            "relation": blocking[0] if blocking else None,
+        }
 
     # ------------------------------------------------------------------
     # Summaries (L2)
@@ -164,6 +280,8 @@ class MemoryManager:
                 last_seq,
                 len(result.text),
             )
+            if kind == "final" and self.settings.memory_auto_capture == "session_end":
+                self._auto_capture(session_id, summary_id, session, last_seq)
         except OneShotError as exc:
             logger.warning("memory.summary_failed summary_id=%s %s", summary_id, exc)
             self.repo_sessions.update_summary(
@@ -188,6 +306,48 @@ class MemoryManager:
     # ------------------------------------------------------------------
     # Fact extraction (L3)
     # ------------------------------------------------------------------
+    def _auto_capture(
+        self,
+        session_id: str,
+        summary_id: str,
+        session: dict[str, Any],
+        last_seq: int,
+    ) -> None:
+        if last_seq <= 0:
+            return
+        if self.repo_facts.active_extraction():
+            logger.info("memory.auto_capture_skipped session_id=%s busy", session_id)
+            return
+        try:
+            extraction = self.repo_facts.create_extraction(
+                {
+                    "role": session.get("role"),
+                    "project_id": session.get("project_id"),
+                    "session_ids": [session_id],
+                    "max_sessions": 1,
+                },
+                trigger="session_end",
+                source_session_id=session_id,
+                source_summary_id=summary_id,
+            )
+        except sqlite3.IntegrityError:
+            logger.info(
+                "memory.auto_capture_duplicate session_id=%s summary_id=%s",
+                session_id,
+                summary_id,
+            )
+            return
+        logger.info(
+            "memory.auto_capture_started extraction_id=%s session_id=%s",
+            extraction["id"],
+            session_id,
+        )
+        self._run_extraction(
+            extraction["id"],
+            [session_id],
+            session.get("project_id"),
+            max_candidates=self.settings.auto_capture_max_candidates,
+        )
     def start_extraction(
         self,
         *,
@@ -247,6 +407,8 @@ class MemoryManager:
         extraction_id: str,
         session_ids: list[str],
         project_id: str | None,
+        *,
+        max_candidates: int | None = None,
     ) -> None:
         try:
             summaries_map = self.repo_sessions.latest_summaries_for_sessions(session_ids)
@@ -293,6 +455,12 @@ class MemoryManager:
                 project_id=project_id,
                 existing_facts=existing_facts,
             )
+            candidates.sort(
+                key=lambda item: float(item.get("confidence") or 0.0),
+                reverse=True,
+            )
+            if max_candidates is not None:
+                candidates = candidates[:max_candidates]
             created: list[str] = []
             for candidate in candidates:
                 fact = self.repo_facts.create_fact(
@@ -303,6 +471,10 @@ class MemoryManager:
                     status="candidate",
                     title=candidate["title"],
                     content_md=candidate["content_md"],
+                    aliases=candidate.get("aliases") or [],
+                    tags=candidate.get("tags") or [],
+                    origin="extraction",
+                    extraction_id=extraction_id,
                     source_session_ids=candidate["source_session_ids"],
                     evidence_md=candidate["evidence_md"],
                     confidence=candidate["confidence"],
@@ -363,7 +535,7 @@ class MemoryManager:
         Scope the list to global + the current workspace; otherwise a
         workspace extraction can target a fact from another workspace.
         """
-        fact_role = role if role in {"coding", "scholar"} else None
+        fact_role = role if role in {"coding", "scholar"} else "both"
         if project_id:
             return self.repo_facts.list_facts(
                 status="accepted",

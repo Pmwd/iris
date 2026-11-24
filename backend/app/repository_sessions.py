@@ -659,7 +659,7 @@ class SessionRepository:
                 """
                 SELECT * FROM session_summaries
                 WHERE session_id = ? AND status = ?
-                ORDER BY created_at DESC
+                ORDER BY covers_through_turn_seq DESC, created_at DESC
                 LIMIT 1
                 """,
                 (session_id, status),
@@ -669,7 +669,7 @@ class SessionRepository:
                 """
                 SELECT * FROM session_summaries
                 WHERE session_id = ?
-                ORDER BY created_at DESC
+                ORDER BY covers_through_turn_seq DESC, created_at DESC
                 LIMIT 1
                 """,
                 (session_id,),

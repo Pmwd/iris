@@ -1,6 +1,6 @@
 # M2 记忆质量基准：案例集设计（10–20 个）
 
-- 状态：设计稿 v1 + **19/19 已通过**（冒烟 5 + 第二批 8 + 第三批 6，2026-11-24）
+- 状态：设计稿 v1 + **19/19 已通过**（冒烟 5 + 第二批 8 + 第三批 6，2026-11-24）；Memory 2.0 回归见第 9 节
 - 目标：验证三层记忆是否真的有用，而不是只看“机制存在”。
 - 环境：真实 Claude CLI/SDK、独立 `IRIS_DATA_DIR`（例如 `artifacts/memory-benchmark`）、固定工作区。
 - 关联：`docs/roadmap.md` M2、`docs/acceptance/m0-real-cli.md`、ADR 0002/0006。
@@ -214,3 +214,32 @@ M2 通过的最低条件：
 3. D1（supersede）正确；
 4. 摘要 A1/A2 至少保留关键决策与产出路径；
 5. 所有失败项有明确原因与改进归属，不以“模型偶发”带过。
+
+## 9. Memory 2.0 回归（2026-11-24）
+
+M2 的 19 个真实案例继续作为基线；Memory 2.0 新增两组验证：
+
+### 9.1 确定性质量集
+
+`scripts/memory_eval.py` + `backend/tests/fixtures/memory_eval.json`：
+
+- 16 条查询，覆盖中文标题 bigram、别名/标签、工作区隔离、混合英文/中文、阈值/abstain、过期事实。
+- 结果：recall@5 1.0、precision 1.0、false injection 0、abstain accuracy 1.0、stale injection 0。
+- 该集不调用模型，可在 pytest/CI 中重放（`test_memory_quality.py`）。
+
+### 9.2 真实 SDK 验收
+
+见 `docs/acceptance/memory-2.0.md` R1–R6：
+
+- 会话结束自动候选（只产 candidate，带来源）；
+- 接受后跨会话 manifest 注入并使用；
+- 中文查询命中、无关查询 abstain；
+- 近似重复进入收件箱并被取代；
+- 过期事实不注入、确认后恢复；
+- 真实 UI 右侧“可能相关”与收件箱操作。
+
+### 9.3 解释
+
+- 新集证明“机制”可重放，但不代表真实语义覆盖；仍需 held-out、人类盲评与更多真实会话。
+- 相似度/冲突仍为确定性文本信号；语义冲突需要用户判断。
+- 自动候选增加一次抽取成本；当前不做自动重试。

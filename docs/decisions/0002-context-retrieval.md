@@ -1,6 +1,6 @@
 # ADR 0002：Phase 2 上下文检索与预算
 
-- 状态：已采用（2026-10-23）
+- 状态：已采用（2026-10-23）；其中“FTS 无结果时回退 LIKE”“中文 bigram 与默认 unicode61 错位”“不对对话自动提取”已由 ADR 0010 / Memory 2.0 调整，历史决策保留。
 - 依据：`docs/acceptance/phase2.md`
 
 ## 背景

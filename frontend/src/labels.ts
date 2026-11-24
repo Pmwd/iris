@@ -119,6 +119,23 @@ export const FACT_REASON_LABELS: Record<string, string> = {
   manual: "手动选择",
   budget: "超出预算",
   not_relevant: "未匹配",
+  below_threshold: "相关度不足",
+  stale: "已过期",
+  no_terms: "没有检索词",
+  no_relevant_facts: "没有相关记忆",
+};
+
+export const FACT_RELATION_LABELS: Record<string, string> = {
+  duplicate: "重复",
+  near_duplicate: "可能重复",
+  conflict: "可能冲突",
+  related: "相关",
+};
+
+export const FACT_ORIGIN_LABELS: Record<string, string> = {
+  manual: "手动",
+  extraction: "自动候选",
+  quick_capture: "聊天记住",
 };
 
 export function roleHomePath(role: RoleId): string {

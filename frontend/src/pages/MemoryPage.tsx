@@ -5,7 +5,15 @@ import { ExtractionPanel } from "../components/ExtractionPanel";
 import { FactCard } from "../components/FactCard";
 import { FactEditor } from "../components/FactEditor";
 import { errorText } from "../format";
-import type { Fact, FactStatus, RoleId, Workspace } from "../types";
+import type {
+  Fact,
+  FactStatus,
+  MemoryInbox,
+  MemoryInboxGroup,
+  RoleId,
+  Session,
+  Workspace,
+} from "../types";
 
 const TABS: Array<{ id: FactStatus; label: string }> = [
   { id: "candidate", label: "候选" },
@@ -23,6 +31,9 @@ export function MemoryPage() {
   const [tab, setTab] = useState<FactStatus>("candidate");
   const [facts, setFacts] = useState<Fact[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [inbox, setInbox] = useState<MemoryInbox | null>(null);
+  const [queryText, setQueryText] = useState(params.get("q") ?? "");
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,20 +42,27 @@ export function MemoryPage() {
 
   async function load() {
     try {
+      const q = queryText.trim() || undefined;
       const [
         workspaceList,
+        sessionList,
+        inboxData,
         candidate,
         accepted,
         rejected,
         archived,
       ] = await Promise.all([
         api.listWorkspaces(),
-        api.listFacts({ status: "candidate", limit: 500 }),
-        api.listFacts({ status: "accepted", limit: 500 }),
-        api.listFacts({ status: "rejected", limit: 500 }),
-        api.listFacts({ status: "archived", limit: 500 }),
+        api.listSessions({ limit: 500 }),
+        api.getMemoryInbox({ role: initialRole ?? undefined, project_id: initialProjectId }),
+        api.listFacts({ status: "candidate", limit: 500, q }),
+        api.listFacts({ status: "accepted", limit: 500, q }),
+        api.listFacts({ status: "rejected", limit: 500, q }),
+        api.listFacts({ status: "archived", limit: 500, q }),
       ]);
       setWorkspaces(workspaceList);
+      setSessions(sessionList);
+      setInbox(inboxData);
       setCounts({
         candidate: candidate.length,
         accepted: accepted.length,
@@ -67,9 +85,22 @@ export function MemoryPage() {
   }
 
   useEffect(() => {
+    const next = params.get("q");
+    if (next !== null && next !== queryText) setQueryText(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
+
+  useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+  }, [tab, queryText]);
+
+  const relationByCandidate = new Map<string, MemoryInboxGroup>();
+  for (const group of inbox?.groups ?? []) {
+    for (const candidate of group.candidates) {
+      relationByCandidate.set(candidate.id, group);
+    }
+  }
 
   return (
     <div className="page memory-page">
@@ -100,6 +131,35 @@ export function MemoryPage() {
       </header>
 
       {error ? <div className="alert alert-error">{error}</div> : null}
+
+      <div className="memory-toolbar">
+        <input
+          value={queryText}
+          onChange={(event) => setQueryText(event.target.value)}
+          placeholder="搜索记忆标题、内容、别名、标签…"
+        />
+        {queryText ? (
+          <button type="button" className="button small ghost" onClick={() => setQueryText("")}>
+            清除
+          </button>
+        ) : null}
+      </div>
+
+      {inbox ? (
+        <div className="inbox-banner">
+          <div>
+            <strong>记忆收件箱</strong>
+            <span className="muted">
+              {" "}
+              {inbox.counts.candidates} 个候选 · {inbox.counts.duplicates} 个可能重复 ·{" "}
+              {inbox.counts.conflicts} 个可能冲突 · {inbox.counts.needs_confirmation} 个需确认
+            </span>
+          </div>
+          {inbox.stale.length ? (
+            <span className="pill pill-error">有过期事实</span>
+          ) : null}
+        </div>
+      ) : null}
 
       {showExtract ? (
         <ExtractionPanel
@@ -152,6 +212,8 @@ export function MemoryPage() {
               key={fact.id}
               fact={fact}
               workspaces={workspaces}
+              sessions={sessions}
+              relationGroup={relationByCandidate.get(fact.id)}
               onChanged={() => void load()}
               onEdit={(target) => setEditor({ fact: target })}
             />

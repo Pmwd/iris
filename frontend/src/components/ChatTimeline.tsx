@@ -14,12 +14,14 @@ export function ChatTimeline({
   liveTurnId,
   liveEvents,
   emptyHint,
+  onRemember,
 }: {
   messages: Message[];
   turns: Turn[];
   liveTurnId: string | null;
   liveEvents: TurnEvent[];
   emptyHint: React.ReactNode;
+  onRemember?: (message: Message) => void;
 }) {
   const byTurn = new Map<
     string,
@@ -63,6 +65,15 @@ export function ChatTimeline({
                 </div>
                 <div className="message-meta">
                   你 · {formatTime(entry.user.created_at)}
+                  {onRemember ? (
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => onRemember(entry.user as Message)}
+                    >
+                      记住
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ) : null}
@@ -80,6 +91,15 @@ export function ChatTimeline({
                 </div>
                 <div className="message-meta">
                   Iris · {formatTime(turn.ended_at ?? turn.created_at)}
+                  {onRemember ? (
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => onRemember(entry.assistant as Message)}
+                    >
+                      记住
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ) : active ? null : (

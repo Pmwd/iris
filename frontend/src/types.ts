@@ -114,13 +114,26 @@ export interface PromptManifest {
     kind: FactKind;
     chars: number;
     reason?: string | null;
+    score?: number;
+    score_parts?: Record<string, number>;
+    source_session_ids?: string[];
+    source_turn_id?: string | null;
   }>;
   excluded_facts?: Array<{
     id: string;
     title: string;
     scope: FactScope;
     reason: string;
+    score?: number;
   }>;
+  selection?: {
+    abstained?: boolean;
+    abstain_reason?: string | null;
+    threshold?: number | null;
+    candidate_count?: number | null;
+    selected_count?: number | null;
+    top_score?: number | null;
+  };
   summary_included?: boolean;
   summary_chars?: number;
   user_message_chars?: number;
@@ -199,17 +212,85 @@ export interface Fact {
   title: string;
   content_md: string;
   aliases: string[];
+  tags: string[];
+  origin: "manual" | "extraction" | "quick_capture" | string;
+  extraction_id: string | null;
+  source_turn_id: string | null;
   pinned: boolean;
   use_count: number;
   last_used_at: string | null;
   source_session_ids: string[];
   evidence_md: string;
   confidence: number | null;
+  valid_until: string | null;
+  last_confirmed_at: string | null;
   supersedes_id: string | null;
+  superseded_by_id: string | null;
+  merged_into_id: string | null;
   extracted_at: string | null;
   reviewed_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface FactRelation {
+  relation: "duplicate" | "near_duplicate" | "conflict" | "related";
+  score: number;
+  target_fact_id: string;
+  target: Fact;
+}
+
+export interface FactRecall extends Fact {
+  score: number;
+  score_parts: Record<string, number>;
+  matched_terms: string[];
+  reason: string;
+}
+
+export interface RelatedMemoriesResponse {
+  query_terms: string[];
+  abstained: boolean;
+  facts: FactRecall[];
+}
+
+export interface MemoryInboxGroup {
+  key: string;
+  kind: "duplicate" | "near_duplicate" | "conflict" | "standalone";
+  suggested_action: "merge" | "review" | "accept_or_reject";
+  score: number;
+  target_fact: Fact | null;
+  candidates: Fact[];
+}
+
+export interface MemoryInbox {
+  counts: {
+    candidates: number;
+    duplicates: number;
+    conflicts: number;
+    needs_confirmation: number;
+  };
+  groups: MemoryInboxGroup[];
+  stale: Fact[];
+}
+
+export interface FactSources {
+  fact_id: string;
+  sessions: Array<{
+    id: string;
+    title: string;
+    role: RoleId;
+    project_id: string | null;
+    status: string;
+    updated_at: string;
+  }>;
+  turns: Array<{
+    id: string;
+    session_id: string;
+    seq: number;
+    created_at: string;
+  }>;
+  extraction_id: string | null;
+  source_turn_id: string | null;
 }
 
 export interface Extraction {

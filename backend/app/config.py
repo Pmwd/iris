@@ -42,6 +42,10 @@ class Settings:
     extraction_timeout_seconds: int = 180
     memory_concurrency: int = 1
     fact_context_max_chars: int = 4000
+    fact_context_max_items: int = 6
+    fact_min_score: float = 0.55
+    memory_auto_capture: str = "session_end"
+    auto_capture_max_candidates: int = 5
     # Execution backend: "sdk" (Claude Agent SDK, interactive approvals) or
     # "cli" (legacy one-shot stream-json runner; used by tests/fake CLI).
     execution_backend: str = "sdk"
@@ -75,6 +79,10 @@ def load_settings() -> Settings:
     def _int_env(name: str, default: int) -> int:
         value = os.environ.get(name)
         return int(value) if value else default
+
+    def _float_env(name: str, default: float) -> float:
+        value = os.environ.get(name)
+        return float(value) if value else default
 
     return Settings(
         data_dir=data_dir,
@@ -118,6 +126,14 @@ def load_settings() -> Settings:
         extraction_timeout_seconds=_int_env("IRIS_EXTRACTION_TIMEOUT_SECONDS", 180),
         memory_concurrency=_int_env("IRIS_MEMORY_CONCURRENCY", 1),
         fact_context_max_chars=_int_env("IRIS_FACT_CONTEXT_MAX_CHARS", 4000),
+        fact_context_max_items=_int_env("IRIS_FACT_CONTEXT_MAX_ITEMS", 6),
+        fact_min_score=_float_env("IRIS_FACT_MIN_SCORE", 0.55),
+        memory_auto_capture=os.environ.get(
+            "IRIS_MEMORY_AUTO_CAPTURE", "session_end"
+        ).strip().lower(),
+        auto_capture_max_candidates=_int_env(
+            "IRIS_AUTO_CAPTURE_MAX_CANDIDATES", 5
+        ),
         execution_backend=os.environ.get("IRIS_EXECUTION_BACKEND", "sdk").strip().lower(),
         claude_cli_path=os.environ.get("IRIS_CLAUDE_CLI_PATH") or None,
         approval_timeout_seconds=_int_env("IRIS_APPROVAL_TIMEOUT_SECONDS", 600),

@@ -28,6 +28,7 @@ v7 的 Turn 是“一次性 `claude -p` + 预授权 PowerShell 白名单”。�
 
 - `ClaudeAgentOptions(permission_mode="default", can_use_tool=...)`。
 - `can_use_tool` 先匹配会话级规则；未命中则创建 `turn_approvals` 记录、发出 `approval.requested` 事件，并 await 一个 `asyncio.Future`。
+- **已知边界（2026-11-24 T7 实测）**：Claude Code 会在调用 `can_use_tool` 之前自动放行部分只读/安全命令（如 `echo`、`Get-Date`、`Start-Sleep`）。这些调用不会产生 Iris 审批记录；写文件、未知 shell 命令、`python` 等仍会弹卡。因此 Iris 的审批是“需要授权时逐条审批”，不是“所有工具调用必弹卡”。
 - 前端聊天内 `ApprovalCard` 提供允许一次 / 总是允许 / 拒绝；HTTP `POST /api/approvals/{id}/decide` 解析 Future。
 - 决策后发出 `approval.decided`；工具结果继续按正常 `tool.result` 事件进入聊天。
 - 超时（默认 600s）按拒绝；取消 Turn 会拒绝所有 pending 审批。
@@ -77,6 +78,7 @@ v7 的 Turn 是“一次性 `claude -p` + 预授权 PowerShell 白名单”。�
 ## 后果
 
 - 网页具备逐条工具审批，粒度接近 terminal，但**不是 OS 沙箱**；批准的命令以 Iris 后端用户权限运行。
+- CLI 对安全只读命令的提前放行无法被 `can_use_tool` 观察到；若需“所有 shell 调用必须经 Iris 审批”，需要 PreToolUse 强制询问或自管 shell 工具，另立里程碑评估。
 - 默认 SDK 依赖 `claude.exe` 和 Python `claude-agent-sdk`；CLI 回退保留。
 - Python SDK 的 `can_use_tool` 依赖 streaming 模式；当前 pin 0.2.187 并验证 `ClaudeSDKClient` 路径；升级 SDK 需重跑审批验收。
 - SDK 可能加载用户级 hooks/插件；项目/本地设置被排除；工作区仍必须可信。

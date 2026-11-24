@@ -164,7 +164,7 @@ def test_spawn_failure_marks_turn_failed(client_factory):
     assert turn["error_type"] == "cli_spawn_failed"
 
 
-def test_schema_v9_is_non_destructive(tmp_path: Path):
+def test_schema_v10_is_non_destructive(tmp_path: Path):
     db_path = tmp_path / "iris.db"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -210,7 +210,7 @@ def test_schema_v9_is_non_destructive(tmp_path: Path):
     finally:
         conn.close()
 
-    assert version == 9
+    assert version == 10
     for table in (
         "sessions",
         "turns",
@@ -242,3 +242,56 @@ def test_scholar_web_toggle_in_sdk_tools():
     assert "WebFetch" not in enabled
     assert "PowerShell" in enabled
     assert "Write" in enabled
+
+
+def test_v10_rebuilds_legacy_facts_fts(tmp_path: Path):
+    db_path = tmp_path / "iris.db"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    database = Database(db_path)
+    database.init()
+    projects = Repository(database)
+    project = projects.create_project("Legacy", str(workspace))
+
+    from app.repository_facts import FactRepository
+
+    facts = FactRepository(database)
+    created = facts.create_fact(
+        scope="workspace",
+        project_id=project["id"],
+        role="coding",
+        kind="constraint",
+        status="accepted",
+        title="构建使用 pnpm",
+        content_md="使用 pnpm 构建。",
+        aliases=["打包"],
+    )
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA user_version = 9")
+    conn.execute("UPDATE facts SET search_text = '' WHERE id = ?", (created["id"],))
+    conn.execute("DROP TABLE facts_fts")
+    conn.execute(
+        "CREATE VIRTUAL TABLE facts_fts USING fts5(fact_id UNINDEXED, title, content)"
+    )
+    conn.commit()
+    conn.close()
+
+    Database(db_path).init()
+
+    conn = sqlite3.connect(db_path)
+    try:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(facts)")]
+        search_text = conn.execute(
+            "SELECT search_text FROM facts WHERE id = ?", (created["id"],)
+        ).fetchone()[0]
+        fts_hit = conn.execute(
+            "SELECT COUNT(*) FROM facts_fts WHERE facts_fts MATCH ?", ("构建",)
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert version == 10
+    assert "search_text" in columns
+    assert "origin" in columns
+    assert "构建" in search_text
+    assert fts_hit == 1

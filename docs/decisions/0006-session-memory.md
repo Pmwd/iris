@@ -1,6 +1,6 @@
 # ADR 0006：Session 工作台与三层记忆
 
-- 状态：已实现（2026-11-23）
+- 状态：已实现（2026-11-23）；事实提取已由 ADR 0010 扩展为“会话结束自动候选 + 手动提取 + 聊天记住，仍人工接受”，历史决策保留。
 - 关联：`README.md`、`CURRENT_PHASE.md`、`docs/acceptance/phase4-sessions.md`
 - 取代：Phase 1–3C 的 Task/Run/Note 交互模型；旧表保留只读
 

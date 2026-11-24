@@ -8,6 +8,7 @@ import {
   ROLE_PROFILES,
 } from "../components/Composer";
 import { MemoryPanel } from "../components/MemoryPanel";
+import { RememberDialog } from "../components/RememberDialog";
 import { StatusBadge } from "../components/StatusBadge";
 import { errorText, formatCost, formatTime } from "../format";
 import { useTurnStream } from "../hooks/useTurnStream";
@@ -53,6 +54,7 @@ export function SessionPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [rememberMessage, setRememberMessage] = useState<Message | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const sendingRef = useRef(false);
 
@@ -106,6 +108,8 @@ export function SessionPage() {
     },
   );
   const lastTurn = turns.length ? turns[turns.length - 1] : null;
+  const lastUserMessage =
+    [...messages].reverse().find((item) => item.role === "user")?.content ?? "";
   const totalCost = turns.reduce(
     (sum, turn) => sum + (turn.cost_usd ?? 0),
     0,
@@ -331,6 +335,7 @@ export function SessionPage() {
             turns={turns}
             liveTurnId={activeTurn?.id ?? null}
             liveEvents={liveEvents}
+            onRemember={(message) => setRememberMessage(message)}
             emptyHint={
               <div className="chat-empty">
                 <div className="empty-illustration">◒</div>
@@ -374,8 +379,19 @@ export function SessionPage() {
         session={session}
         summary={summary}
         lastTurn={lastTurn}
+        relatedQuery={input || lastUserMessage}
         onChanged={() => void load()}
       />
+
+      {rememberMessage ? (
+        <RememberDialog
+          message={rememberMessage}
+          session={session}
+          workspace={workspace}
+          onClose={() => setRememberMessage(null)}
+          onSaved={() => void load()}
+        />
+      ) : null}
     </div>
   );
 }

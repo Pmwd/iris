@@ -1,30 +1,64 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { errorText, formatTime } from "../format";
 import { FACT_REASON_LABELS, FACT_SCOPE_LABELS } from "../labels";
-import type { Session, SummaryResponse, Turn } from "../types";
+import type {
+  MemoryInbox,
+  Session,
+  SummaryResponse,
+  Turn,
+} from "../types";
 import { MarkdownMessage } from "./MarkdownMessage";
+import { RelatedMemories } from "./RelatedMemories";
 import { StatusBadge } from "./StatusBadge";
 
 export function MemoryPanel({
   session,
   summary,
   lastTurn,
+  relatedQuery = "",
   onChanged,
 }: {
   session: Session;
   summary: SummaryResponse | null;
   lastTurn: Turn | null;
+  relatedQuery?: string;
   onChanged: () => void;
 }) {
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [inbox, setInbox] = useState<MemoryInbox | null>(null);
 
   const latest = summary?.summary ?? null;
   const active = summary?.active ?? null;
   const included = lastTurn?.prompt_manifest?.included_facts ?? [];
+  const excluded = lastTurn?.prompt_manifest?.excluded_facts ?? [];
+  const selection = lastTurn?.prompt_manifest?.selection;
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+
+    function loadInbox() {
+      api
+        .getMemoryInbox({ role: session.role, project_id: session.project_id })
+        .then((data) => {
+          if (!cancelled) setInbox(data);
+        })
+        .catch(() => {
+          if (!cancelled) setInbox(null);
+        });
+    }
+
+    loadInbox();
+    timer = window.setInterval(loadInbox, 10_000);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearInterval(timer);
+    };
+  }, [session.role, session.project_id, lastTurn?.id, summary?.summary?.id]);
 
   async function regenerate() {
     setBusy(true);
@@ -62,6 +96,31 @@ export function MemoryPanel({
       </div>
 
       {error ? <div className="alert alert-error">{error}</div> : null}
+
+      <RelatedMemories
+        query={relatedQuery}
+        role={session.role}
+        projectId={session.project_id}
+      />
+
+      {inbox && inbox.counts.candidates > 0 ? (
+        <section className="memory-section inbox-summary">
+          <div className="memory-section-head">
+            <span>记忆收件箱</span>
+            <span className="pill">{inbox.counts.candidates}</span>
+          </div>
+          <div className="memory-note">
+            {inbox.counts.duplicates} 个可能重复 · {inbox.counts.conflicts} 个可能冲突
+          </div>
+          <button
+            type="button"
+            className="button small primary"
+            onClick={() => navigate("/memory")}
+          >
+            去审核
+          </button>
+        </section>
+      ) : null}
 
       <section className="memory-section">
         <div className="memory-section-head">
@@ -106,15 +165,48 @@ export function MemoryPanel({
                 <span className="muted">
                   {FACT_SCOPE_LABELS[fact.scope]} ·{" "}
                   {FACT_REASON_LABELS[fact.reason ?? ""] ?? fact.reason ?? "相关"}
+                  {typeof fact.score === "number"
+                    ? ` · ${Math.round(fact.score * 100)}%`
+                    : ""}
                 </span>
+                {fact.source_session_ids?.length ? (
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => navigate("/memory")}
+                  >
+                    来源
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>
         ) : (
           <div className="muted">
-            还没有已接受的事实命中本轮。到记忆库提取或手动添加。
+            {selection?.abstained
+              ? `本轮没有注入记忆（${
+                  FACT_REASON_LABELS[selection.abstain_reason ?? ""] ??
+                  selection.abstain_reason ??
+                  "无相关记忆"
+                }）。`
+              : "还没有已接受的事实命中本轮。到记忆库提取或手动添加。"}
           </div>
         )}
+        {excluded.length ? (
+          <details className="excluded-facts">
+            <summary>{excluded.length} 条未注入（查看原因）</summary>
+            <ul className="fact-chip-list">
+              {excluded.slice(0, 12).map((fact) => (
+                <li key={fact.id} className="fact-chip">
+                  <span className="fact-chip-title">{fact.title}</span>
+                  <span className="muted">
+                    {FACT_REASON_LABELS[fact.reason] ?? fact.reason}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
       </section>
 
       <div className="memory-actions">

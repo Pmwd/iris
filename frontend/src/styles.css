@@ -1298,6 +1298,97 @@ code {
   flex-wrap: wrap;
 }
 
+.fact-relation-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--warm-soft);
+  border: 1px solid color-mix(in srgb, var(--warm) 30%, transparent);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.fact-sources {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.source-link {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dotted currentColor;
+}
+
+.tag-pill {
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin-left: 8px;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: inherit;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
+.memory-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0;
+}
+
+.memory-toolbar input {
+  flex: 1;
+  min-width: 0;
+}
+
+.inbox-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.inbox-summary .button {
+  align-self: flex-start;
+}
+
+.related-chip .fact-chip-title {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.excluded-facts {
+  margin-top: 8px;
+}
+
+.excluded-facts summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .extraction-panel {
   background: var(--paper);
   border: 1px solid var(--line);

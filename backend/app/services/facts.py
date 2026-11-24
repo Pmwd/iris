@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
-from ..repository_facts import FactRepository, normalize_fingerprint
-from ..text import query_terms
+from ..repository_facts import FactRepository
+from ..text import normalize_fingerprint, query_terms
 
 FACT_KINDS = {
     "preference",
@@ -51,38 +52,182 @@ def _parse_time(value: str | None) -> datetime | None:
 
 
 def _recency_score(fact: dict[str, Any]) -> float:
-    stamp = _parse_time(fact.get("updated_at") or fact.get("reviewed_at"))
+    stamp = _parse_time(
+        fact.get("last_confirmed_at")
+        or fact.get("reviewed_at")
+        or fact.get("updated_at")
+    )
     if stamp is None:
         return 0.0
     if stamp.tzinfo is None:
         stamp = stamp.replace(tzinfo=timezone.utc)
     days = max(0.0, (datetime.now(timezone.utc) - stamp).total_seconds() / 86400)
-    if days <= 30:
-        return 12.0
-    if days <= 90:
-        return 6.0
-    if days <= 365:
-        return 2.0
-    return 0.0
+    return round(0.5 ** (days / 90.0), 4)
 
 
 def _aliases_text(fact: dict[str, Any]) -> str:
     return " ".join(str(alias) for alias in fact.get("aliases") or []).lower()
 
 
-def _substring_score(fact: dict[str, Any], terms: Iterable[str]) -> float:
+def _tags_text(fact: dict[str, Any]) -> str:
+    return " ".join(str(tag) for tag in fact.get("tags") or []).lower()
+
+
+def _is_stale(fact: dict[str, Any], now: datetime) -> bool:
+    stamp = _parse_time(fact.get("valid_until"))
+    if stamp is None:
+        return False
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return stamp <= now
+
+
+def _match_detail(
+    fact: dict[str, Any], terms: Iterable[str]
+) -> dict[str, Any]:
     title = (fact.get("title") or "").lower()
     content = (fact.get("content_md") or "").lower()
     aliases = _aliases_text(fact)
-    score = 0.0
+    tags = _tags_text(fact)
+    title_hits: list[str] = []
+    alias_hits: list[str] = []
+    tag_hits: list[str] = []
+    content_hits: list[str] = []
     for term in terms:
         if _contains(title, term):
-            score += 8
+            title_hits.append(term)
         if _contains(aliases, term):
-            score += 4
+            alias_hits.append(term)
+        if _contains(tags, term):
+            tag_hits.append(term)
         if _contains(content, term):
-            score += 2
-    return score
+            content_hits.append(term)
+    all_hits = set(title_hits) | set(alias_hits) | set(tag_hits) | set(content_hits)
+    return {
+        "title_hits": title_hits,
+        "alias_hits": alias_hits,
+        "tag_hits": tag_hits,
+        "content_hits": content_hits,
+        "all_hits": all_hits,
+        "strong": bool(title_hits or alias_hits or tag_hits),
+    }
+
+
+def _score_fact(
+    fact: dict[str, Any],
+    terms: list[str],
+    *,
+    hit_rank: int | None,
+) -> dict[str, Any]:
+    detail = _match_detail(fact, terms)
+    term_count = max(1, len(terms))
+    title_hits = len(detail["title_hits"])
+    alias_hits = len(detail["alias_hits"])
+    tag_hits = len(detail["tag_hits"])
+    content_hits = len(detail["content_hits"])
+    lexical = (
+        2.0 * title_hits
+        + 1.5 * alias_hits
+        + 1.2 * tag_hits
+        + 0.5 * content_hits
+    )
+    lexical_component = min(1.0, lexical / (2.0 * term_count))
+    coverage = len(detail["all_hits"]) / term_count
+    fts_component = (
+        1.0 / (1.0 + max(0, hit_rank) / 5.0)
+        if hit_rank is not None
+        else 0.0
+    )
+    recency = _recency_score(fact)
+    usage = min(1.0, math.log1p(int(fact.get("use_count") or 0)) / math.log1p(20))
+    confidence = fact.get("confidence")
+    confidence_component = (
+        0.5 + 0.5 * float(confidence)
+        if confidence is not None
+        else 0.5
+    )
+    base = (
+        0.45 * fts_component
+        + 0.25 * lexical_component
+        + 0.10 * coverage
+        + 0.10 * recency
+        + 0.05 * usage
+        + 0.05 * confidence_component
+    )
+    pinned = bool(fact.get("pinned"))
+    score = min(1.0, base + (0.5 if pinned else 0.0))
+    return {
+        "score": round(score, 4),
+        "matched": bool(detail["all_hits"]),
+        "strong": detail["strong"],
+        "matched_terms": sorted(detail["all_hits"]),
+        "score_parts": {
+            "fts": round(fts_component, 4),
+            "lexical": round(lexical_component, 4),
+            "coverage": round(coverage, 4),
+            "recency": round(recency, 4),
+            "usage": round(usage, 4),
+            "confidence": round(confidence_component, 4),
+        },
+        "pinned": pinned,
+    }
+
+
+def _rank_candidates(
+    repo: FactRepository,
+    *,
+    role: str,
+    project_id: str | None,
+    query: str,
+    min_score: float,
+    max_items: int | None,
+) -> tuple[list[dict[str, Any]], list[str], int]:
+    terms = query_terms(query)
+    candidates = repo.accepted_context_facts(role, project_id)
+    hits = repo.search_facts(query, role, project_id) if terms else []
+    hit_index = {fact["id"]: index for index, fact in enumerate(hits)}
+    now = datetime.now(timezone.utc)
+    ranked: list[dict[str, Any]] = []
+    for fact in candidates:
+        stale = _is_stale(fact, now)
+        detail = _score_fact(
+            fact, terms, hit_rank=hit_index.get(fact["id"])
+        )
+        fact.update(detail)
+        fact["search_rank"] = hit_index.get(fact["id"])
+        fact["recommended"] = False
+        if stale:
+            fact["reason"] = "stale"
+        elif not terms:
+            fact["reason"] = "no_terms" if not fact.get("pinned") else "pinned"
+        elif fact["pinned"]:
+            fact["reason"] = "pinned"
+        elif not fact["matched"]:
+            fact["reason"] = "not_relevant"
+        elif not fact["strong"] and len(fact["matched_terms"]) < 2:
+            fact["reason"] = "not_relevant"
+        elif fact["score"] < min_score:
+            fact["reason"] = "below_threshold"
+        else:
+            fact["reason"] = "matched"
+        ranked.append(fact)
+    ranked.sort(
+        key=lambda fact: (
+            0 if fact.get("pinned") else 1,
+            0 if fact.get("reason") in {"matched", "pinned"} else 1,
+            -float(fact.get("score", 0)),
+            fact.get("updated_at") or "",
+        )
+    )
+    eligible = [
+        fact
+        for fact in ranked
+        if fact.get("reason") in {"matched", "pinned"}
+        and (fact.get("pinned") or float(fact.get("score", 0)) >= min_score)
+    ]
+    if max_items is not None:
+        eligible = eligible[:max_items]
+    return ranked, [fact["id"] for fact in eligible], int(round(min_score * 1000))
 
 
 def select_facts(
@@ -93,46 +238,19 @@ def select_facts(
     query: str,
     budget_chars: int,
     explicit_ids: list[str] | None = None,
+    min_score: float = 0.55,
+    max_items: int | None = 6,
 ) -> dict[str, Any]:
     terms = query_terms(query)
-    candidates = repo.accepted_context_facts(role, project_id)
-    hits = repo.search_facts(query, role, project_id)
-    hit_index = {fact["id"]: index for index, fact in enumerate(hits)}
-
-    for fact in candidates:
-        searchable = " ".join(
-            [
-                (fact.get("title") or "").lower(),
-                (fact.get("content_md") or "").lower(),
-                _aliases_text(fact),
-            ]
-        )
-        local_matches = [term for term in terms if _contains(searchable, term)]
-        rank_index = hit_index.get(fact["id"])
-        score = (
-            _substring_score(fact, terms)
-            + _recency_score(fact)
-            + min(int(fact.get("use_count", 0)), 20) * 1.5
-        )
-        if fact.get("pinned"):
-            score += 1000
-        if rank_index is not None and local_matches:
-            score += 300 - min(rank_index, 50) * 4
-        fact["matched"] = bool(local_matches)
-        fact["search_rank"] = rank_index
-        fact["score"] = round(score, 2)
-        fact["recommended"] = False
-        fact["reason"] = "not_relevant"
-
-    candidates.sort(
-        key=lambda fact: (
-            0 if fact.get("pinned") else 1,
-            0 if fact.get("matched") else 1,
-            fact.get("search_rank") if fact.get("search_rank") is not None else 999,
-            -float(fact.get("score", 0)),
-            fact.get("updated_at") or "",
-        )
+    candidates, eligible_ids, _ = _rank_candidates(
+        repo,
+        role=role,
+        project_id=project_id,
+        query=query,
+        min_score=min_score,
+        max_items=max_items,
     )
+    eligible_set = set(eligible_ids)
 
     if explicit_ids is not None:
         wanted = list(dict.fromkeys(explicit_ids))
@@ -157,23 +275,34 @@ def select_facts(
             selected.append(fact)
             used += size
         selection_mode = "manual"
+        abstained = False
+        abstain_reason = None
     else:
         selected = []
         used = 0
         for fact in candidates:
-            # Pinned facts are always eligible; everything else needs a match.
-            eligible = fact.get("matched") or fact.get("pinned")
-            if not eligible:
+            if fact["id"] not in eligible_set:
                 continue
             size = len(fact.get("title", "")) + len(fact.get("content_md", "")) + 24
             if used + size > budget_chars:
                 fact["reason"] = "budget"
                 continue
             fact["recommended"] = True
-            fact["reason"] = "pinned" if fact.get("pinned") else "matched"
+            if fact["reason"] == "matched":
+                fact["reason"] = "pinned" if fact.get("pinned") else "matched"
             selected.append(fact)
             used += size
         selection_mode = "auto"
+        abstained = not selected
+        if abstained:
+            if not terms:
+                abstain_reason = "no_terms"
+            elif not any(fact.get("matched") for fact in candidates):
+                abstain_reason = "no_relevant_facts"
+            else:
+                abstain_reason = "below_threshold"
+        else:
+            abstain_reason = None
 
     candidates.sort(
         key=lambda fact: (
@@ -190,6 +319,37 @@ def select_facts(
         "budget_chars": budget_chars,
         "query_terms": terms,
         "selection_mode": selection_mode,
+        "abstained": abstained,
+        "abstain_reason": abstain_reason,
+        "candidate_count": len(candidates),
+        "selected_count": len(selected),
+        "top_score": max((float(fact.get("score", 0)) for fact in candidates), default=0.0),
+        "threshold": min_score,
+    }
+
+
+def suggest_facts(
+    repo: FactRepository,
+    *,
+    role: str,
+    project_id: str | None,
+    query: str,
+    limit: int = 5,
+    min_score: float = 0.55,
+) -> dict[str, Any]:
+    ranked, eligible_ids, _ = _rank_candidates(
+        repo,
+        role=role,
+        project_id=project_id,
+        query=query,
+        min_score=min_score,
+        max_items=limit,
+    )
+    eligible = [fact for fact in ranked if fact["id"] in set(eligible_ids)]
+    return {
+        "query_terms": query_terms(query),
+        "abstained": not eligible,
+        "facts": eligible,
     }
 
 
@@ -250,6 +410,18 @@ def parse_extraction(
         title = str(raw.get("title") or "").strip()
         content_md = str(raw.get("content_md") or "").strip()
         evidence_md = str(raw.get("evidence_md") or "").strip()
+        aliases_raw = raw.get("aliases")
+        aliases = (
+            [str(a).strip() for a in aliases_raw if str(a).strip()]
+            if isinstance(aliases_raw, list)
+            else []
+        )
+        tags_raw = raw.get("tags")
+        tags = (
+            [str(t).strip() for t in tags_raw if str(t).strip()]
+            if isinstance(tags_raw, list)
+            else []
+        )
         source_ids = raw.get("source_session_ids")
         if not isinstance(source_ids, list):
             source_ids = []
@@ -307,6 +479,8 @@ def parse_extraction(
             "role": role,
             "title": title,
             "content_md": content_md,
+            "aliases": aliases,
+            "tags": tags,
             "evidence_md": evidence_md,
             "source_session_ids": source_ids,
             "confidence": confidence_value,
@@ -318,6 +492,12 @@ def parse_extraction(
         if existing:
             existing["source_session_ids"] = list(
                 dict.fromkeys(existing["source_session_ids"] + source_ids)
+            )
+            existing["aliases"] = list(
+                dict.fromkeys(existing.get("aliases", []) + aliases)
+            )
+            existing["tags"] = list(
+                dict.fromkeys(existing.get("tags", []) + tags)
             )
             if len(content_md) > len(existing["content_md"]):
                 existing["content_md"] = content_md

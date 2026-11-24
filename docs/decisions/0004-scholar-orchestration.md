@@ -1,6 +1,8 @@
 # ADR 0004：Scholar 编排层与原生网页工具
 
 > 2026-11-24 调整：Scholar 默认改为本地 prompt-first，WebSearch/WebFetch 默认关闭；Web 模式需 `IRIS_SCHOLAR_WEB=1`。见 ADR 0009。本 ADR 保留历史决策与原型记录。
+>
+> 2026-11-24 M4 评估：14 题结构化盲评中 Scholar 胜 12、Coding 胜 2；优势集中在 calibration/counterargument/source honesty，correctness 略低且 2 题输在可执行性。结论：暂不进入本研究会话编排，先做人类盲评与最小多轮原型。
 
 - 状态：原型已实现；第一个真实任务部分子任务失败，等待可靠性修正和第二轮复用验证
 - 日期：2026-10-24（更新于 2026-10-25）

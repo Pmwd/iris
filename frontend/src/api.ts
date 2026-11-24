@@ -8,6 +8,9 @@ import type {
   FactKind,
   FactRole,
   FactScope,
+  FactSources,
+  MemoryInbox,
+  RelatedMemoriesResponse,
   Health,
   ManagedProcess,
   MetricTimeseries,
@@ -53,7 +56,9 @@ function json(body: unknown, method = "POST"): RequestInit {
   return { method, body: JSON.stringify(body) };
 }
 
-function query(params: Record<string, string | number | boolean | undefined>): string {
+function query(
+  params: Record<string, string | number | boolean | null | undefined>,
+): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === "") continue;
@@ -174,6 +179,10 @@ export const api = {
     role?: FactRole;
     include_global?: boolean;
     limit?: number;
+    q?: string;
+    tag?: string;
+    origin?: string;
+    stale?: boolean;
   } = {}) => request<Fact[]>(`/facts${query(params)}`),
   createFact: (body: {
     scope: FactScope;
@@ -184,7 +193,9 @@ export const api = {
     title: string;
     content_md?: string;
     aliases?: string[];
+    tags?: string[];
     pinned?: boolean;
+    valid_until?: string | null;
   }) => request<Fact>("/facts", json(body)),
   updateFact: (
     id: string,
@@ -197,11 +208,59 @@ export const api = {
       title?: string;
       content_md?: string;
       aliases?: string[];
+      tags?: string[];
       pinned?: boolean;
+      valid_until?: string | null;
     },
   ) => request<Fact>(`/facts/${id}`, json(body, "PATCH")),
   archiveFact: (id: string) =>
     request<{ archived: boolean }>(`/facts/${id}`, { method: "DELETE" }),
+  rememberFact: (body: {
+    text: string;
+    title?: string;
+    scope?: FactScope;
+    project_id?: string | null;
+    role?: FactRole;
+    kind?: FactKind;
+    aliases?: string[];
+    tags?: string[];
+    source_session_id?: string | null;
+    source_turn_id?: string | null;
+    accept?: boolean;
+  }) =>
+    request<{
+      fact: Fact;
+      created: boolean;
+      accepted: boolean;
+      needs_review: boolean;
+      relation: { relation: string; score: number; target_fact_id: string; target: Fact } | null;
+    }>("/facts/remember", json(body)),
+  mergeFact: (
+    id: string,
+    body: {
+      target_fact_id: string;
+      mode: "merge" | "supersede" | "keep_both";
+      content_md?: string | null;
+    },
+  ) =>
+    request<{ mode: string; fact: Fact; target: Fact }>(
+      `/facts/${id}/merge`,
+      json(body),
+    ),
+  confirmFact: (id: string, valid_until: string | null = null) =>
+    request<Fact>(`/facts/${id}/confirm`, json({ valid_until })),
+  getFactSources: (id: string) =>
+    request<FactSources>(`/facts/${id}/sources`),
+  getRelatedMemories: (params: {
+    q: string;
+    role?: FactRole;
+    project_id?: string | null;
+    limit?: number;
+  }) => request<RelatedMemoriesResponse>(`/memory/related${query(params)}`),
+  getMemoryInbox: (params: {
+    role?: RoleId;
+    project_id?: string | null;
+  } = {}) => request<MemoryInbox>(`/memory/inbox${query(params)}`),
   extractFacts: (body: {
     role?: RoleId | null;
     project_id?: string | null;

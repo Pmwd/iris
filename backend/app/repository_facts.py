@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 from typing import Any, Iterable
 from uuid import uuid4
 
 from .db import Database, utcnow
-from .text import query_terms
+from .text import build_search_text, normalize_fingerprint, query_terms
 
 
 def _json_load(value: str | None, default: Any) -> Any:
@@ -24,8 +23,10 @@ def _fact(row: Any | None) -> dict[str, Any] | None:
         return None
     data = dict(row)
     aliases = _json_load(data.pop("aliases_json", None), [])
+    tags = _json_load(data.pop("tags_json", None), [])
     sources = _json_load(data.pop("source_session_ids_json", None), [])
     data["aliases"] = [str(a) for a in aliases] if isinstance(aliases, list) else []
+    data["tags"] = [str(t) for t in tags] if isinstance(tags, list) else []
     data["source_session_ids"] = (
         [str(s) for s in sources] if isinstance(sources, list) else []
     )
@@ -42,11 +43,6 @@ def _extraction(row: Any | None) -> dict[str, Any] | None:
     return data
 
 
-def normalize_fingerprint(title: str, kind: str, scope: str, project_id: str | None) -> str:
-    text = re.sub(r"\s+", " ", (title or "").strip().lower())
-    return f"{kind}|{scope}|{project_id or ''}|{text}"
-
-
 class FactRepository:
     """SQL for long-term facts, their FTS index, and extraction jobs."""
 
@@ -59,20 +55,17 @@ class FactRepository:
     def _index_fact(self, fact: dict[str, Any]) -> None:
         if not self.db.fts_enabled:
             return
-        aliases = " ".join(str(a) for a in fact.get("aliases") or [])
+        search_text = fact.get("search_text") or build_search_text(
+            fact.get("title") or "",
+            fact.get("content_md") or "",
+            fact.get("aliases") or [],
+            fact.get("tags") or [],
+        )
         with self.db.transaction() as conn:
             conn.execute("DELETE FROM facts_fts WHERE fact_id = ?", (fact["id"],))
             conn.execute(
-                """
-                INSERT INTO facts_fts(fact_id, title, content)
-                VALUES (?, ?, ?)
-                """,
-                (
-                    fact["id"],
-                    fact["title"],
-                    fact["content_md"]
-                    + ("\n" + aliases if aliases else ""),
-                ),
+                "INSERT INTO facts_fts(fact_id, search_text) VALUES (?, ?)",
+                (fact["id"], search_text),
             )
 
     def _unindex_fact(self, fact_id: str) -> None:
@@ -90,11 +83,18 @@ class FactRepository:
         title: str,
         content_md: str = "",
         aliases: Iterable[str] | None = None,
+        tags: Iterable[str] | None = None,
+        origin: str = "manual",
+        extraction_id: str | None = None,
+        source_turn_id: str | None = None,
         pinned: bool = False,
         source_session_ids: Iterable[str] | None = None,
         evidence_md: str = "",
         confidence: float | None = None,
+        valid_until: str | None = None,
         supersedes_id: str | None = None,
+        superseded_by_id: str | None = None,
+        merged_into_id: str | None = None,
         extracted_at: str | None = None,
         reviewed_at: str | None = None,
     ) -> dict[str, Any]:
@@ -102,14 +102,29 @@ class FactRepository:
         now = utcnow()
         if reviewed_at is None and status in {"accepted", "rejected"}:
             reviewed_at = now
+        alias_list = list(aliases or [])
+        tag_list = list(tags or [])
+        source_list = list(source_session_ids or [])
+        fingerprint = normalize_fingerprint(
+            title, kind, scope, project_id if scope == "workspace" else None
+        )
+        search_text = build_search_text(
+            title, content_md, alias_list, tag_list
+        )
+        last_confirmed_at = (
+            now if status == "accepted" else None
+        )
         self.db.execute(
             """
             INSERT INTO facts
                 (id, scope, project_id, role, kind, status, title, content_md,
-                 aliases_json, pinned, source_session_ids_json, evidence_md,
-                 confidence, supersedes_id, extracted_at, reviewed_at,
-                 created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 aliases_json, tags_json, origin, extraction_id, source_turn_id,
+                 pinned, source_session_ids_json, evidence_md, confidence,
+                 valid_until, last_confirmed_at, supersedes_id,
+                 superseded_by_id, merged_into_id, fingerprint, search_text,
+                 extracted_at, reviewed_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 fact_id,
@@ -120,12 +135,22 @@ class FactRepository:
                 status,
                 title,
                 content_md,
-                json.dumps(list(aliases or []), ensure_ascii=False),
+                json.dumps(alias_list, ensure_ascii=False),
+                json.dumps(tag_list, ensure_ascii=False),
+                origin,
+                extraction_id,
+                source_turn_id,
                 1 if pinned else 0,
-                json.dumps(list(source_session_ids or []), ensure_ascii=False),
+                json.dumps(source_list, ensure_ascii=False),
                 evidence_md,
                 confidence,
+                valid_until,
+                last_confirmed_at,
                 supersedes_id,
+                superseded_by_id,
+                merged_into_id,
+                fingerprint,
+                search_text,
                 extracted_at,
                 reviewed_at,
                 now,
@@ -151,6 +176,10 @@ class FactRepository:
         role: str | None = None,
         include_global: bool = True,
         limit: int = 500,
+        q: str | None = None,
+        tag: str | None = None,
+        origin: str | None = None,
+        stale: bool | None = None,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -169,6 +198,30 @@ class FactRepository:
         if role:
             clauses.append("(role = ? OR role = 'both')")
             params.append(role)
+        if origin:
+            clauses.append("origin = ?")
+            params.append(origin)
+        if tag:
+            clauses.append("LOWER(COALESCE(tags_json, '')) LIKE ?")
+            params.append(f"%{tag.lower()}%")
+        if stale is True:
+            clauses.append("valid_until IS NOT NULL AND valid_until <= ?")
+            params.append(utcnow())
+        elif stale is False:
+            clauses.append("(valid_until IS NULL OR valid_until > ?)")
+            params.append(utcnow())
+        if q:
+            terms = query_terms(q, limit=12)
+            if terms:
+                like = " OR ".join(
+                    "(LOWER(title) LIKE ? OR LOWER(content_md) LIKE ? "
+                    "OR LOWER(COALESCE(aliases_json, '')) LIKE ? "
+                    "OR LOWER(COALESCE(tags_json, '')) LIKE ?)"
+                    for _ in terms
+                )
+                clauses.append(f"({like})")
+                for term in terms:
+                    params.extend([f"%{term}%"] * 4)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
         rows = self.db.query_all(
@@ -193,15 +246,50 @@ class FactRepository:
             "title",
             "content_md",
             "aliases",
+            "tags",
             "pinned",
+            "valid_until",
+            "origin",
+            "superseded_by_id",
+            "merged_into_id",
         }
+        current = self.get_fact(fact_id)
+        if not current:
+            return None
+        merged = dict(current)
+        for key, value in fields.items():
+            if key not in allowed:
+                continue
+            if value is None and key not in {"project_id", "valid_until"}:
+                continue
+            merged[key] = value
+        if merged.get("scope") != "workspace":
+            merged["project_id"] = None
+        fingerprint = normalize_fingerprint(
+            merged.get("title") or "",
+            merged.get("kind") or "",
+            merged.get("scope") or "",
+            merged.get("project_id"),
+        )
+        search_text = build_search_text(
+            merged.get("title") or "",
+            merged.get("content_md") or "",
+            merged.get("aliases") or [],
+            merged.get("tags") or [],
+        )
         assignments: list[str] = []
         params: list[Any] = []
         for key, value in fields.items():
-            if key not in allowed or value is None:
+            if key not in allowed:
+                continue
+            if value is None and key not in {"project_id", "valid_until"}:
                 continue
             if key == "aliases":
                 assignments.append("aliases_json = ?")
+                params.append(json.dumps(list(value), ensure_ascii=False))
+                continue
+            if key == "tags":
+                assignments.append("tags_json = ?")
                 params.append(json.dumps(list(value), ensure_ascii=False))
                 continue
             if key == "pinned":
@@ -221,11 +309,19 @@ class FactRepository:
             if key == "status" and value in {"accepted", "rejected"}:
                 assignments.append("reviewed_at = COALESCE(reviewed_at, ?)")
                 params.append(utcnow())
+                if value == "accepted":
+                    assignments.append("last_confirmed_at = COALESCE(last_confirmed_at, ?)")
+                    params.append(utcnow())
         if not assignments:
             return self.get_fact(fact_id)
-        assignments.append("updated_at = ?")
-        params.append(utcnow())
-        params.append(fact_id)
+        assignments.extend(
+            [
+                "fingerprint = ?",
+                "search_text = ?",
+                "updated_at = ?",
+            ]
+        )
+        params.extend([fingerprint, search_text, utcnow(), fact_id])
         self.db.execute(
             f"UPDATE facts SET {', '.join(assignments)} WHERE id = ?",
             tuple(params),
@@ -250,13 +346,19 @@ class FactRepository:
                 conn.execute(
                     """
                     UPDATE facts
-                    SET status = 'archived', updated_at = ?
+                    SET status = 'archived', superseded_by_id = ?,
+                        last_confirmed_at = COALESCE(last_confirmed_at, ?),
+                        updated_at = ?
                     WHERE id = ?
                     """,
-                    (now, supersedes_id),
+                    (fact_id, now, now, supersedes_id),
                 )
-            assignments = "status = 'accepted', reviewed_at = COALESCE(reviewed_at, ?), updated_at = ?"
-            params: list[Any] = [now, now]
+            assignments = (
+                "status = 'accepted', reviewed_at = COALESCE(reviewed_at, ?), "
+                "last_confirmed_at = COALESCE(last_confirmed_at, ?), "
+                "updated_at = ?"
+            )
+            params: list[Any] = [now, now, now]
             if supersedes_id:
                 assignments += ", supersedes_id = ?"
                 params.append(supersedes_id)
@@ -282,6 +384,130 @@ class FactRepository:
     def delete_fact(self, fact_id: str) -> bool:
         self._unindex_fact(fact_id)
         return bool(self.db.execute("DELETE FROM facts WHERE id = ?", (fact_id,)))
+
+    def find_by_fingerprint(
+        self, fingerprint: str, status: str = "accepted"
+    ) -> dict[str, Any] | None:
+        row = self.db.query_one(
+            "SELECT * FROM facts WHERE fingerprint = ? AND status = ? LIMIT 1",
+            (fingerprint, status),
+        )
+        return _fact(row)
+
+    def confirm_fact(
+        self, fact_id: str, valid_until: str | None = None
+    ) -> dict[str, Any] | None:
+        fact = self.get_fact(fact_id)
+        if not fact:
+            return None
+        now = utcnow()
+        self.db.execute(
+            """
+            UPDATE facts
+            SET last_confirmed_at = ?, valid_until = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (now, valid_until, now, fact_id),
+        )
+        fact = self.get_fact(fact_id)
+        if fact and fact["status"] == "accepted":
+            self._index_fact(fact)
+        return fact
+
+    def merge_fact(
+        self,
+        source_id: str,
+        target_id: str,
+        *,
+        content_md: str | None = None,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        source = self.get_fact(source_id)
+        target = self.get_fact(target_id)
+        if not source or not target or source_id == target_id:
+            return None, None
+        aliases = list(dict.fromkeys([*(target.get("aliases") or []), *(source.get("aliases") or [])]))
+        tags = list(dict.fromkeys([*(target.get("tags") or []), *(source.get("tags") or [])]))
+        sources = list(
+            dict.fromkeys(
+                [
+                    *(target.get("source_session_ids") or []),
+                    *(source.get("source_session_ids") or []),
+                ]
+            )
+        )
+        evidences = [
+            item
+            for item in [target.get("evidence_md"), source.get("evidence_md")]
+            if item
+        ]
+        evidence = "\n".join(dict.fromkeys(evidences))
+        now = utcnow()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                UPDATE facts
+                SET aliases_json = ?, tags_json = ?, source_session_ids_json = ?,
+                    evidence_md = ?, content_md = COALESCE(?, content_md),
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    json.dumps(aliases, ensure_ascii=False),
+                    json.dumps(tags, ensure_ascii=False),
+                    json.dumps(sources, ensure_ascii=False),
+                    evidence,
+                    content_md,
+                    now,
+                    target_id,
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE facts
+                SET status = 'archived', merged_into_id = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (target_id, now, source_id),
+            )
+        target = self.get_fact(target_id)
+        source = self.get_fact(source_id)
+        if target:
+            target = self.update_fact(target_id, {"title": target["title"]}) or target
+        if source:
+            self._unindex_fact(source_id)
+        return source, target
+
+    def fact_sources(self, fact_id: str) -> dict[str, Any] | None:
+        fact = self.get_fact(fact_id)
+        if not fact:
+            return None
+        session_ids = list(fact.get("source_session_ids") or [])
+        sessions: list[dict[str, Any]] = []
+        if session_ids:
+            placeholders = ",".join("?" for _ in session_ids)
+            rows = self.db.query_all(
+                f"""
+                SELECT id, title, role, project_id, status, updated_at
+                FROM sessions WHERE id IN ({placeholders})
+                """,
+                tuple(session_ids),
+            )
+            sessions = [dict(row) for row in rows]
+        turns: list[dict[str, Any]] = []
+        if fact.get("source_turn_id"):
+            row = self.db.query_one(
+                "SELECT id, session_id, seq, created_at FROM turns WHERE id = ?",
+                (fact["source_turn_id"],),
+            )
+            if row:
+                turns.append(dict(row))
+        return {
+            "fact_id": fact_id,
+            "sessions": sessions,
+            "turns": turns,
+            "extraction_id": fact.get("extraction_id"),
+            "source_turn_id": fact.get("source_turn_id"),
+        }
 
     def mark_facts_used(self, fact_ids: Iterable[str]) -> None:
         ids = list(dict.fromkeys(fact_ids))
@@ -341,6 +567,7 @@ class FactRepository:
             if project_id
             else "scope = 'global'"
         )
+        by_id: dict[str, dict[str, Any]] = {}
         if self.db.fts_enabled:
             fts_query = " OR ".join(f'"{term}"' for term in terms)
             params: list[Any] = [fts_query, role]
@@ -362,26 +589,24 @@ class FactRepository:
                     """,
                     tuple(params),
                 )
-                if rows:
-                    result = []
-                    for row in rows:
-                        fact = _fact(row) or {}
-                        fact["search_rank"] = float(row["search_rank"] or 0)
-                        result.append(fact)
-                    return result
+                for row in rows:
+                    fact = _fact(row) or {}
+                    fact["search_rank"] = float(row["search_rank"] or 0)
+                    by_id[fact["id"]] = fact
             except sqlite3.OperationalError:
                 pass
 
         like_groups = " OR ".join(
             "(LOWER(title) LIKE ? OR LOWER(content_md) LIKE ? "
-            "OR LOWER(COALESCE(aliases_json, '')) LIKE ?)"
+            "OR LOWER(COALESCE(aliases_json, '')) LIKE ? "
+            "OR LOWER(COALESCE(tags_json, '')) LIKE ?)"
             for _ in terms
         )
         params = [role]
         if project_id:
             params.append(project_id)
         for term in terms:
-            params.extend([f"%{term}%", f"%{term}%", f"%{term}%"])
+            params.extend([f"%{term}%"] * 4)
         params.append(limit)
         rows = self.db.query_all(
             f"""
@@ -395,26 +620,44 @@ class FactRepository:
             """,
             tuple(params),
         )
-        result = []
         for row in rows:
             fact = _fact(row) or {}
-            fact["search_rank"] = 0.0
-            result.append(fact)
-        return result
+            if fact["id"] not in by_id:
+                fact["search_rank"] = float(limit + 1)
+                by_id[fact["id"]] = fact
+        result = list(by_id.values())
+        result.sort(key=lambda item: (item.get("search_rank", 999), item.get("updated_at") or ""))
+        return result[:limit]
 
     # ------------------------------------------------------------------
     # Extraction jobs
     # ------------------------------------------------------------------
-    def create_extraction(self, scope: dict[str, Any]) -> dict[str, Any]:
+    def create_extraction(
+        self,
+        scope: dict[str, Any],
+        *,
+        trigger: str = "manual",
+        source_session_id: str | None = None,
+        source_summary_id: str | None = None,
+    ) -> dict[str, Any]:
         extraction_id = str(uuid4())
         now = utcnow()
         self.db.execute(
             """
             INSERT INTO fact_extractions
-                (id, status, scope_json, created_at, started_at)
-            VALUES (?, 'running', ?, ?, ?)
+                (id, status, scope_json, trigger, source_session_id,
+                 source_summary_id, created_at, started_at)
+            VALUES (?, 'running', ?, ?, ?, ?, ?, ?)
             """,
-            (extraction_id, json.dumps(scope, ensure_ascii=False), now, now),
+            (
+                extraction_id,
+                json.dumps(scope, ensure_ascii=False),
+                trigger,
+                source_session_id,
+                source_summary_id,
+                now,
+                now,
+            ),
         )
         extraction = self.get_extraction(extraction_id)
         assert extraction is not None

@@ -37,6 +37,8 @@ export function FactEditor({
   const [title, setTitle] = useState(fact?.title ?? "");
   const [content, setContent] = useState(fact?.content_md ?? "");
   const [aliases, setAliases] = useState((fact?.aliases ?? []).join("\n"));
+  const [tags, setTags] = useState((fact?.tags ?? []).join("\n"));
+  const [validUntil, setValidUntil] = useState(fact?.valid_until ?? "");
   const [pinned, setPinned] = useState(fact?.pinned ?? false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +62,9 @@ export function FactEditor({
       title: title.trim(),
       content_md: content,
       aliases: splitLines(aliases),
+      tags: splitLines(tags),
       pinned,
+      valid_until: validUntil.trim() || null,
     };
     try {
       if (editing && fact) {
@@ -175,14 +179,36 @@ export function FactEditor({
             />
           </label>
 
+          <div className="form-row">
+            <label>
+              别名 / 关键词（每行一个）
+              <textarea
+                rows={2}
+                className="mono"
+                value={aliases}
+                onChange={(event) => setAliases(event.target.value)}
+                placeholder="补充不同措辞，帮助检索命中"
+              />
+            </label>
+            <label>
+              标签（每行一个）
+              <textarea
+                rows={2}
+                className="mono"
+                value={tags}
+                onChange={(event) => setTags(event.target.value)}
+                placeholder="tooling / deployment"
+              />
+            </label>
+          </div>
+
           <label>
-            别名 / 关键词（每行一个）
-            <textarea
-              rows={2}
+            有效期（可选，ISO 时间；过期后不再注入）
+            <input
               className="mono"
-              value={aliases}
-              onChange={(event) => setAliases(event.target.value)}
-              placeholder="补充不同措辞，帮助检索命中"
+              value={validUntil}
+              onChange={(event) => setValidUntil(event.target.value)}
+              placeholder="2027-01-01T00:00:00+00:00"
             />
           </label>
 
