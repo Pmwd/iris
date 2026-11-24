@@ -1,7 +1,7 @@
 # Iris 当前阶段
 
 > 阶段：Phase 4 — Session + 三层记忆 + 双角色 + Claude Agent SDK 审批 + 工作区运行面板
-> 状态：后端与前端实现完成；46 个后端测试通过；前端构建通过；SDK 真实审批冒烟通过；T4–T6 真实验收通过；M1 最小可观测已实现；M2 19/19 案例通过；待补齐 T1–T3/Scholar/摘要验收
+> 状态：后端与前端实现完成；46 个后端测试通过；前端构建通过；M0 T1–T6 + Scholar + 摘要通过；M1 最小可观测已实现；M2 19/19 案例通过；剩余手工审批边界/运行面板 dev server/compact 待验
 > 更新时间：2026-11-24
 > 依据：`docs/decisions/0006-session-memory.md`、`docs/decisions/0007-agent-sdk-approvals.md`、`docs/acceptance/phase4-sessions.md`
 
@@ -87,6 +87,7 @@
 
 ### 4.2 真实 CLI / SDK 验收
 
+- [x] T1–T3：真实问答/流式、Read 工具、Write+PowerShell 审批与文件/命令闭环。
 - [x] SDK 在 Windows + 本机 `claude.exe` + CC Switch/DeepSeek 下触发 `can_use_tool`。
 - [x] 允许 PowerShell 后真实执行并生成文件；成本/usage 返回。
 - [x] 同一 Session 通过 SDK resume 续聊。
@@ -94,9 +95,9 @@
 - [x] 记忆召回：新 Session 的 manifest 注入 accepted 事实（reason=matched），`use_count` +1，回答使用该事实。
 - [x] 取消：允许长驻 `python` 命令后取消，状态 `canceled`，工具子进程被终止，同一 Session 可继续。
 - [x] 异常退出：强杀后端后 CLI 与其工具进程被清理；重启 `reconciled_turns=1`，Turn=`interrupted`，pending 审批=`expired`，锁释放，后续 Turn 成功。
-- [ ] Scholar 联网研究（`research` 档位）与来源保留。
-- [ ] 真实摘要语义质量与成本观察。
-- [ ] 真实事实提取的信噪比、去重与审核体验。
+- [x] Scholar 联网研究（`research` 档位）与来源保留；WebSearch/WebFetch 真实触发，摘要保留 URL。
+- [x] 真实摘要质量与成本观察（A1–A4、T2/T3/Scholar）；记录英文摘要与环境噪声问题。
+- [x] 真实事实提取的信噪比、去重、冲突与过期（M2 19/19）。
 - [ ] compact 在真实 resume 失败场景下的恢复。
 - [ ] 真实 UI 中的“总是允许/拒绝/超时”完整手工流程。
 - [ ] 运行面板：真实 dev server 启动、日志刷新、停止与关闭 Iris 后的进程清理。
@@ -105,9 +106,8 @@
 
 后续方向、可观测计划与全局系统大盘见 `docs/roadmap.md`（M0 真实验收 → M1 最小可观测 → M2 记忆质量 → M3 大盘 → M4 Scholar → M5 体验）。
 
-1. 完成 `docs/acceptance/m0-real-cli.md` 的 T1–T6 矩阵与 `docs/acceptance/phase4-sessions.md` 的完整真实 SDK 验收。
-2. 补齐 T1–T3、Scholar 联网与真实摘要质量验收；M2 已 19/19 通过，可定期复跑作为回归。
-3. 基于 M1 指标与 M2 结论决定是否调整摘要阈值、事实注入预算与检索策略。
-4. 进入 M3 全局大盘（rollups + Dashboard + 可选告警）。
-5. 评估是否把 Scholar 深度研究编排迁移到 Session 之上（先验证相对普通聊天的增量价值，单独 ADR）。
-6. 视真实使用情况决定是否引入语义检索；当前保持 FTS5 + 关键词 + 别名。
+1. M3 全局大盘：`metric_rollups` + `/api/metrics/timeseries` + `/dashboard`（可选告警）。
+2. 补完 M0 手工边界：真实 UI 的允许一次/总是允许/拒绝/超时、运行面板真实 dev server、compact resume 失败恢复。
+3. 基于 M1 指标与 M2 结论调整摘要阈值、事实注入预算与检索策略。
+4. 评估是否把 Scholar 深度研究编排迁移到 Session 之上（先验证相对普通聊天的增量价值，单独 ADR）。
+5. 视真实使用情况决定是否引入语义检索；当前保持 FTS5 + 关键词 + 别名。

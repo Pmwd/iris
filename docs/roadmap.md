@@ -1,6 +1,6 @@
 # Iris 路线图（v8 之后）
 
-> 状态：M0 T4–T6 真实验收通过；M1 最小可观测已实现；M2 记忆 19/19 通过；待补 T1–T3/Scholar/摘要  
+> 状态：M0 T1–T6 + Scholar + 摘要通过；M1 最小可观测已实现；M2 记忆 19/19 通过；剩余手工审批边界/dev server/compact  
 > 更新时间：2026-11-24  
 > 本文件：后续方向讨论机制、可观测计划、全局系统大盘、里程碑与优先级  
 > 当前阶段：`CURRENT_PHASE.md` · 历史路线：`docs/roadmap-history.md` · 决策：`docs/decisions/` · 验收：`docs/acceptance/`
@@ -369,7 +369,7 @@ ADR 状态：`提议 / 已采用 / 已取代 / 已放弃`。方向被放弃也�
 
 | 里程碑 | 内容 | 交付 | 验收 | 依赖 |
 |---|---|---|---|---|
-| **M0 真实验收** | T1–T6 + 审批全流程 + Scholar 联网 + 真实摘要 | 验收记录、阻塞问题修复 | `docs/acceptance/m0-real-cli.md` 全部通过 | 无 |
+| **M0 真实验收** | ✅ T1–T6 + Scholar 联网 + 真实摘要（手工审批边界/dev server/compact 待补） | 验收记录、阻塞问题修复 | `docs/acceptance/m0-real-cli.md` | 无 |
 | **M1 最小可观测** | ✅ O1 指标层 + 健康/错误 API（不做告警） | `services/metrics.py`、`/api/metrics/*`、46 个测试 | 指标与 SQL 对账；范围/过滤；无内容泄露 | M0 基本通过 |
 | **M2 记忆质量验证** | ✅ 19/19 真实案例通过 | `docs/evaluation/memory-benchmark.md`、评估记录、调整结论 | 摘要保留、事实正确、跨 Session 召回、冲突可控 | M1 有数据 |
 | **M3 全局大盘** | O2 rollups + `/dashboard` + 可选告警 | 大盘页面、组合 API、下钻 | 一屏回答五个问题；下钻可用；构建通过 | M1 + M2 |
