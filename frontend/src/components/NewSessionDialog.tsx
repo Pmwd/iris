@@ -86,7 +86,9 @@ export function NewSessionDialog({
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
                 placeholder={
-                  role === "coding" ? "例如：修复登录回归" : "例如：比较三种向量检索方案"
+                  role === "coding"
+                    ? "例如：修复登录回归"
+                    : "例如：梳理这个问题的已知事实、反例与未知"
                 }
               />
             </label>

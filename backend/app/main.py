@@ -18,7 +18,7 @@ from .repository_facts import FactRepository
 from .repository_sessions import SessionRepository
 from .services.approvals import ApprovalManager
 from .services.memory import MemoryManager
-from .services.metrics import MetricsService
+from .services.metrics import MetricsService, RollupWorker
 from .services.processes import WorkspaceProcessManager
 from .services.sessions import SessionManager
 
@@ -53,6 +53,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     memory_manager.reconcile()
     process_manager = WorkspaceProcessManager(repo, settings)
     metrics = MetricsService(database, settings)
+    rollup_worker = (
+        RollupWorker(metrics, settings.rollup_interval_seconds)
+        if settings.rollup_worker_enabled
+        else None
+    )
     session_manager = SessionManager(
         repo,
         session_repo,
@@ -71,7 +76,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        if rollup_worker is not None:
+            rollup_worker.start()
         yield
+        if rollup_worker is not None:
+            await asyncio.to_thread(rollup_worker.stop)
         await asyncio.to_thread(process_manager.shutdown)
         await asyncio.to_thread(session_manager.shutdown)
         await asyncio.to_thread(memory_manager.shutdown)
@@ -87,6 +96,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.memory_manager = memory_manager
     app.state.process_manager = process_manager
     app.state.metrics = metrics
+    app.state.rollup_worker = rollup_worker
 
     def guarded_error(detail: str, status_code: int) -> JSONResponse:
         response = JSONResponse({"detail": detail}, status_code=status_code)

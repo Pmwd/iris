@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
+import { DashboardPage } from "./pages/DashboardPage";
 import { MemoryPage } from "./pages/MemoryPage";
 import { RoleHome } from "./pages/RoleHome";
 import { SessionPage } from "./pages/SessionPage";
@@ -11,6 +12,7 @@ export function App() {
     <Routes>
       <Route element={<AppShell />}>
         <Route path="/" element={<Navigate to="/coding" replace />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/memory" element={<MemoryPage />} />
         <Route path="/workspaces" element={<WorkspacesPage />} />
         <Route path="/workspaces/:workspaceId" element={<WorkspaceDetailPage />} />

@@ -15,7 +15,7 @@ def utcnow() -> str:
 
 
 class Database:
-    SCHEMA_VERSION = 8
+    SCHEMA_VERSION = 9
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
@@ -55,6 +55,8 @@ class Database:
                 self._migrate_v7(conn)
             if version < 8:
                 self._migrate_v8(conn)
+            if version < 9:
+                self._migrate_v9(conn)
             conn.execute(f"PRAGMA user_version = {self.SCHEMA_VERSION}")
         finally:
             conn.close()
@@ -120,6 +122,11 @@ class Database:
     def _migrate_v8(self, conn: sqlite3.Connection) -> None:
         # Schema v8 adds turn_approvals and permission_rules (created by
         # schema.sql); no legacy data is modified.
+        self._setup_fts(conn)
+
+    def _migrate_v9(self, conn: sqlite3.Connection) -> None:
+        # Schema v9 adds metric_rollups (created by schema.sql). It is derived
+        # data and can be rebuilt at any time.
         self._setup_fts(conn)
 
     def _setup_fts(

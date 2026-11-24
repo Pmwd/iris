@@ -21,6 +21,9 @@ class Settings:
     max_context_chars: int = 16000
     max_event_payload_chars: int = 20000
     sse_poll_seconds: float = 0.25
+    rollup_worker_enabled: bool = True
+    rollup_interval_seconds: int = 300
+    scholar_web_enabled: bool = False
     research_max_subtasks: int = 5
     research_concurrency: int = 2
     research_subtask_max_turns: int = 8
@@ -83,6 +86,15 @@ def load_settings() -> Settings:
         run_timeout_seconds=_int_env("IRIS_RUN_TIMEOUT_SECONDS", 1800),
         max_context_chars=_int_env("IRIS_MAX_CONTEXT_CHARS", 16000),
         max_event_payload_chars=_int_env("IRIS_MAX_EVENT_PAYLOAD_CHARS", 20000),
+        rollup_worker_enabled=(
+            os.environ.get("IRIS_ROLLUP_WORKER", "1").strip().lower()
+            not in {"0", "false", "off", "no"}
+        ),
+        rollup_interval_seconds=_int_env("IRIS_ROLLUP_INTERVAL_SECONDS", 300),
+        scholar_web_enabled=(
+            os.environ.get("IRIS_SCHOLAR_WEB", "0").strip().lower()
+            in {"1", "true", "on", "yes"}
+        ),
         research_max_subtasks=_int_env("IRIS_RESEARCH_MAX_SUBTASKS", 5),
         research_concurrency=_int_env("IRIS_RESEARCH_CONCURRENCY", 2),
         research_subtask_max_turns=_int_env("IRIS_RESEARCH_SUBTASK_MAX_TURNS", 8),

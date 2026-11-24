@@ -52,12 +52,20 @@
 - 强杀后：后端与 CLI PID 均消失（Job Object 兜底）。
 - 重启后：`reconciled_turns=1`；Turn=`interrupted`（`service_restart`）；审批=`expired`；Session `active_turn=null`；同一 Session 新消息成功。
 
-### Scholar 联网与来源（2026-11-24）
+### Scholar 本地 prompt-first（2026-11-24，默认）
 
-- Scholar 会话、`research` 档位；真实触发 `WebSearch` ×6、`WebFetch` ×3（审批允许）。
-- 回答列出 Claude 模型家族与来源 URL（`platform.claude.com`、`anthropic.com`、The Verge、TNW、The Batch 等）。
-- 结束会话摘要包含 URL。
+- Scholar 会话、`research` 档位；默认 `IRIS_SCHOLAR_WEB=0`。
+- `system.init.tools` **不含** `WebSearch/WebFetch`；只含 Read/Glob/Grep 等本地工具。
+- 回答按 `KNOWN / INFERRED / HYPOTHESIS / UNKNOWN` 标注，包含定义、反例/边界条件、置信度与“什么证据会改变结论”；明确声明为模型知识、未联网核验。
+- 成本约 $0.5055；Turn succeeded。
+- 证据：`artifacts/scholar-local/results.json`（gitignored）。
+
+### Scholar Web 模式（可选，历史验收 2026-11-24）
+
+- 设置 `IRIS_SCHOLAR_WEB=1` 后，`research` 档位才启用 `WebSearch/WebFetch`。
+- 真实触发 `WebSearch` ×6、`WebFetch` ×3（审批允许）；回答含来源 URL，摘要保留 URL。
 - 局限：部分官方页面被网络策略拦截（WebFetch 返回 “Unable to verify if domain is safe to fetch”），模型明确说明未直接核验官方原文；来源仍保留。
+- 该模式不是默认；见 ADR 0009。
 
 ### 真实摘要质量与成本（2026-11-24）
 
@@ -69,6 +77,7 @@
 ## 3. 尚未覆盖
 
 - [ ] 真实 UI 中“允许一次 / 总是允许 / 拒绝 / 超时”的完整手工审批流程（当前 T3 通过 API 自动允许）。
+- [ ] Scholar Web 模式默认关闭；需要外部来源时显式设置 `IRIS_SCHOLAR_WEB=1`。
 - [ ] 运行面板真实 dev server 的启动、日志、停止与后端退出清理（已有 Python 进程冒烟）。
 - [ ] compact 在真实 resume 失败场景下的恢复。
 - [ ] 长期/held-out 记忆样本与成本基线。
@@ -78,6 +87,6 @@
 M0 通过需要：
 
 1. T1–T6 全部有可复现步骤与记录；
-2. 审批全流程与 Scholar 联网至少各完成一次真实流程；
+2. 审批全流程与 Scholar 本地 prompt 分析各完成一次真实流程（Web 模式可选）；
 3. 发现的阻塞问题（孤儿进程、状态误记、锁未释放）已修复并回验；
 4. 失败项有明确原因、影响范围与后续里程碑归属，不能以“偶发”带过。

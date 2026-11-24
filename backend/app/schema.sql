@@ -329,3 +329,20 @@ CREATE TABLE IF NOT EXISTS permission_rules (
 
 CREATE INDEX IF NOT EXISTS idx_permission_rules_session
     ON permission_rules(session_id, tool_name);
+
+-- ----------------------------------------------------------------------
+-- Schema v9: metric rollups for the dashboard.
+-- ----------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS metric_rollups (
+    bucket_start TEXT NOT NULL,
+    bucket_size TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    dimensions_json TEXT NOT NULL DEFAULT '{}',
+    value REAL NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (bucket_start, bucket_size, metric, dimensions_json)
+);
+
+CREATE INDEX IF NOT EXISTS idx_metric_rollups_lookup
+    ON metric_rollups(metric, bucket_size, dimensions_json, bucket_start);

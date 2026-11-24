@@ -243,6 +243,124 @@ export interface SummaryResponse {
   items: Summary[];
 }
 
+export interface MetricsTurns {
+  total: number;
+  active: number;
+  stuck: number;
+  succeeded: number;
+  failed: number;
+  canceled: number;
+  interrupted: number;
+  success_rate: number | null;
+  duration_p50_seconds: number | null;
+  duration_p95_seconds: number | null;
+  queue_wait_p95_seconds: number | null;
+  resume_rate: number | null;
+  resume_failure_rate: number | null;
+  cancel_rate: number | null;
+}
+
+export interface MetricsOverview {
+  generated_at: string;
+  range: string;
+  since: string;
+  filters: { role: RoleId | null; project_id: string | null };
+  turns: MetricsTurns;
+  cost: {
+    total_usd: number;
+    per_success_usd: number | null;
+    by_session: Array<{
+      session_id: string;
+      title: string;
+      cost_usd: number;
+      turns: number;
+    }>;
+  };
+  tools: {
+    calls: number;
+    denials: number;
+    calls_per_turn: number | null;
+    top: Array<{ name: string; calls: number }>;
+  };
+  memory: {
+    summary_lag: number;
+    summary_failure_rate: number | null;
+    summary_coverage: number | null;
+    fact_candidates_pending: number;
+    fact_accept_rate: number | null;
+    fact_injection_rate: number | null;
+    fact_use_top: Fact[];
+    extraction_success_rate: number | null;
+  };
+  errors: {
+    top: Array<{ error_type: string; count: number }>;
+    failed_turns: number;
+  };
+  storage: {
+    db_bytes: number;
+    raw_log_bytes: number;
+    workspace_log_bytes: number;
+    backup_age_seconds: number | null;
+    disk_free_bytes: number | null;
+  };
+}
+
+export interface MetricsHealth {
+  generated_at: string;
+  status: string;
+  db_ok: boolean;
+  execution_backend: string;
+  sdk_cli_path: string | null;
+  turns: { active: number; stuck: number };
+  queues: {
+    summaries_pending: number;
+    summaries_running: number;
+    extractions_running: number;
+  };
+  cli: Health["cli"];
+}
+
+export interface MetricsError {
+  turn_id: string;
+  session_id: string;
+  role: RoleId;
+  project_id: string | null;
+  error_type: string;
+  error_message: string;
+  created_at: string;
+  ended_at: string | null;
+  cost_usd: number | null;
+}
+
+export interface DashboardAlert {
+  level: "info" | "warning" | "critical";
+  rule: string;
+  message: string;
+}
+
+export interface DashboardOverviewResponse {
+  generated_at: string;
+  range: string;
+  filters: { role: RoleId | null; project_id: string | null };
+  health: MetricsHealth;
+  overview: MetricsOverview;
+  alerts: DashboardAlert[];
+  recent_errors: MetricsError[];
+}
+
+export interface TimeseriesPoint {
+  bucket_start: string;
+  value: number;
+}
+
+export interface MetricTimeseries {
+  metric: string;
+  bucket: "hour" | "day";
+  range: string;
+  filters: { role: RoleId | null; project_id: string | null };
+  points: TimeseriesPoint[];
+}
+
 export interface Health {
   status: string;
   data_dir: string;

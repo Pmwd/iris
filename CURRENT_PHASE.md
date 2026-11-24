@@ -1,7 +1,7 @@
 # Iris 当前阶段
 
-> 阶段：Phase 4 — Session + 三层记忆 + 双角色 + Claude Agent SDK 审批 + 工作区运行面板
-> 状态：后端与前端实现完成；46 个后端测试通过；前端构建通过；M0 T1–T6 + Scholar + 摘要通过；M1 最小可观测已实现；M2 19/19 案例通过；剩余手工审批边界/运行面板 dev server/compact 待验
+> 阶段：Phase 4 — Session + 三层记忆 + 双角色 + Claude Agent SDK 审批 + 工作区运行面板 + 系统大盘
+> 状态：后端与前端实现完成；49 个后端测试通过；前端构建通过；M0 T1–T6 + Scholar + 摘要通过；M1 可观测、M2 记忆基准 19/19、M3 系统大盘已实现；Scholar 默认本地 prompt-first（Web 可选）；剩余手工审批边界/运行面板 dev server/compact 待验
 > 更新时间：2026-11-24
 > 依据：`docs/decisions/0006-session-memory.md`、`docs/decisions/0007-agent-sdk-approvals.md`、`docs/acceptance/phase4-sessions.md`
 
@@ -22,7 +22,7 @@
 
 ### 后端
 
-- Schema **v8**：v7 的 `sessions`、`turns`、`messages`、`turn_events`、`session_summaries`、`facts`、`fact_extractions`、`facts_fts`，新增 `turn_approvals`、`permission_rules`；旧表只读保留，**不迁移**。
+- Schema **v9**：v7 的 `sessions`、`turns`、`messages`、`turn_events`、`session_summaries`、`facts`、`fact_extractions`、`facts_fts`，v8 新增 `turn_approvals`、`permission_rules`，v9 新增 `metric_rollups`；旧表只读保留，**不迁移**。
 - **执行层**：`SdkTurnRunner` 使用 `ClaudeSDKClient` + `can_use_tool`；`cli_path` 指向原生 `claude.exe`；`setting_sources=["user"]` 保留 CC Switch/DeepSeek；`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` 关闭自动 project memory；首次新 session、后续 resume。
 - **审批桥接**：`ApprovalManager` 将 `can_use_tool` 挂起，等待 HTTP 决策；支持允许一次/总是允许/拒绝、超时、取消；事件写入 `turn_events`，记录写入 `turn_approvals`。
 - **进程树清理**：每 Turn 附加 Windows Job Object；取消时先调度 async 取消（状态记为 `canceled`），再关闭 Job 并 `taskkill /T /F`，工具子进程不会残留；后端被强杀时 `KILL_ON_JOB_CLOSE` 兜底。
@@ -30,14 +30,16 @@
 - **CLI 回退**：`IRIS_EXECUTION_BACKEND=cli` 保留旧 one-shot `build_command` + fake CLI 测试路径。
 - **工作区运行面板**：`WorkspaceProcessManager` 在工作区目录启动长驻命令，线程读取输出（内存保留 2000 行并追加 `data/workspace_processes/<id>.log`），支持状态、PID、退出码、停止进程树；删除工作区/关闭 Iris 时清理；进程记录仅内存保存。
 - **M2 记忆基准**：19/19 通过——摘要保留（A1–A4）、事实提取（B1–B4）、跨 Session 召回/隔离（C1–C5）、冲突/过期（D1–D3）、预算/手动（E1–E2）、manifest 透明（F1）。过程中修复自动 project memory 泄漏与提取 existing_facts 跨工作区目标错误；结果见 `docs/evaluation/memory-benchmark.md`。
-- **M1 最小可观测**：`MetricsService` + `/api/metrics/overview|health|errors`；Turn/成本/工具/记忆/错误/存储聚合，支持 role/project/range 过滤；只返回计数、时长、成本、状态与错误类型，不含消息/事实/工具内容；无 timeseries/rollups/告警/Dashboard。
+- **M1 最小可观测**：`MetricsService` + `/api/metrics/overview|health|errors`；Turn/成本/工具/记忆/错误/存储聚合，支持 role/project/range 过滤；只返回计数、时长、成本、状态与错误类型，不含消息/事实/工具内容。
+- **Scholar prompt-first**：强化 `roles.py` 的学术分析方法（问题框定、KNOWN/INFERRED/HYPOTHESIS/UNKNOWN、反例/替代解释、置信度、无来源不编造）；默认关闭 WebSearch/WebFetch（`IRIS_SCHOLAR_WEB=0`），`research` 档位走本地阅读 + 结构化分析；设置 `IRIS_SCHOLAR_WEB=1` 才启用网页工具。
+- **M3 系统大盘**：schema v9 `metric_rollups`（小时/天桶 + dimensions JSON）；`/api/metrics/timeseries`；`RollupWorker` 启动时 + 每 5 分钟刷新（查询时也会补算）；`/api/dashboard/overview` 组合健康、KPI、告警、最近错误；前端 `/dashboard` 支持 24h/7d/30d、角色/工作区过滤、Turn 柱图、成本线图、数据表、记忆/工具/存储/成本 Top；告警仅页面内展示。
 - **原始记忆**：`messages` + `turn_events` + 每 Turn 完整 JSONL（SDK 消息 JSONL / CLI stream-json）。
 - **增量流式**：SDK `include_partial_messages=True`，`text_delta` 聚合成 `assistant.delta`（约 60 字/0.1 秒）写入事件流，经 SSE 推送；最终 `assistant.text` 覆盖草稿。
 - **并发不变量**：同一 Session 一个活动 Turn；同一工作区一个活动 Coding Turn（DB 部分唯一索引）。
 - **MemoryManager**：单 worker 摘要队列；阈值 8 Turn / 24000 字符；结束 final 摘要；compact 后清空 CLI session。
 - **事实管线**：手动提取、严格 JSON 校验、来源会话校验、指纹去重、`supersedes` 归档；候选只有被接受后才进入上下文。
 - **上下文**：事实按角色/作用域/关键词/置顶/预算选择；新 CLI 会话注入摘要，resume 不重复注入；manifest 可追溯。
-- **API**：`/api/workspaces`、`/api/sessions`、`/api/turns`、`/api/approvals`、`/api/facts`、`/api/fact-extractions`、`/api/workspaces/{id}/processes`、`/api/processes/{id}`、`/api/metrics/overview|health|errors`；健康检查与维护保留。
+- **API**：`/api/workspaces`、`/api/sessions`、`/api/turns`、`/api/approvals`、`/api/facts`、`/api/fact-extractions`、`/api/workspaces/{id}/processes`、`/api/processes/{id}`、`/api/metrics/overview|health|errors|timeseries`、`/api/dashboard/overview`；健康检查与维护保留。
 - 启动时把活动 Turn 标为 `interrupted`，运行中的摘要/提取标为失败，pending 审批标为过期。
 
 ### 前端
@@ -53,7 +55,7 @@
 
 ### 测试与工具
 
-- **46 个后端测试通过**：会话/Turn、多轮 resume、并发锁、取消、启动校正、原始日志、摘要、compact、事实提取/审核/注入、别名、schema v8 迁移、备份与安全；审批桥接允许/拒绝/always/超时/取消与规则匹配；运行面板启动/日志/停止、参数校验、归档工作区与删除时清理进程；Windows Job Object 与 taskkill 进程树清理；M1 指标空库/聚合/过滤/隐私；提取 existing_facts 的 workspace/role 作用域。
+- **49 个后端测试通过**：会话/Turn、多轮 resume、并发锁、取消、启动校正、原始日志、摘要、compact、事实提取/审核/注入、别名、schema v9 迁移、备份与安全；审批桥接允许/拒绝/always/超时/取消与规则匹配；运行面板启动/日志/停止、参数校验、归档工作区与删除时清理进程；Windows Job Object 与 taskkill 进程树清理；M1 指标空库/聚合/过滤/隐私；rollups/timeseries/dashboard；提取 existing_facts 的 workspace/role 作用域。
 - **真实 SDK 冒烟**：本机 CLI 2.1.221 + CC Switch/DeepSeek，`can_use_tool` 触发 PowerShell 审批；允许后文件真实生成；同会话 resume 成功；成本/usage 返回。
 - 前端 `npm run build` 通过；pending 审批卡片已用 Edge/Playwright 截图验证。
 - `scripts/context_report.py` 报告 Turn 注入与事实使用；`scripts/crash_test.py` 验证 Session Turn 崩溃/恢复。
@@ -72,7 +74,7 @@
 
 ### 4.1 自动化
 
-- [x] Schema v8 创建与旧库非破坏迁移。
+- [x] Schema v9 创建与旧库非破坏迁移。
 - [x] Coding 无工作区被拒绝；Scholar 无工作区可运行。
 - [x] 发消息产生 user message、Turn、assistant result、工具事件与原始日志。
 - [x] 多轮续聊复用同一 CLI session；resume 失败不自动重试。
@@ -83,6 +85,7 @@
 - [x] 运行面板启停、日志增量、PID/退出码、归档拒绝启动、删除工作区时停止进程。
 - [x] M1 指标：空库不崩溃、Turn/成本/工具/记忆聚合、role/project/range 过滤、错误不含正文。
 - [x] M2 全量：A1–A4/B1–B4/C1–C5/D1–D3/E1–E2/F1 真实 SDK 通过；supersede、预算、隔离、冲突暴露与 manifest 透明均验证；D1 修复跨工作区 update 目标。
+- [x] M3 大盘：schema v9 `metric_rollups`、小时/天桶、role/project 过滤、`/dashboard` 与数据表；真实数据截图验证。
 - [x] 前端 `npm run build` 通过。
 
 ### 4.2 真实 CLI / SDK 验收
@@ -95,7 +98,7 @@
 - [x] 记忆召回：新 Session 的 manifest 注入 accepted 事实（reason=matched），`use_count` +1，回答使用该事实。
 - [x] 取消：允许长驻 `python` 命令后取消，状态 `canceled`，工具子进程被终止，同一 Session 可继续。
 - [x] 异常退出：强杀后端后 CLI 与其工具进程被清理；重启 `reconciled_turns=1`，Turn=`interrupted`，pending 审批=`expired`，锁释放，后续 Turn 成功。
-- [x] Scholar 联网研究（`research` 档位）与来源保留；WebSearch/WebFetch 真实触发，摘要保留 URL。
+- [x] Scholar prompt-first：本地材料/模型知识 + 结构化分析；默认不联网；Web 模式（`IRIS_SCHOLAR_WEB=1`）历史验收通过并保留来源。
 - [x] 真实摘要质量与成本观察（A1–A4、T2/T3/Scholar）；记录英文摘要与环境噪声问题。
 - [x] 真实事实提取的信噪比、去重、冲突与过期（M2 19/19）。
 - [ ] compact 在真实 resume 失败场景下的恢复。
@@ -106,8 +109,7 @@
 
 后续方向、可观测计划与全局系统大盘见 `docs/roadmap.md`（M0 真实验收 → M1 最小可观测 → M2 记忆质量 → M3 大盘 → M4 Scholar → M5 体验）。
 
-1. M3 全局大盘：`metric_rollups` + `/api/metrics/timeseries` + `/dashboard`（可选告警）。
-2. 补完 M0 手工边界：真实 UI 的允许一次/总是允许/拒绝/超时、运行面板真实 dev server、compact resume 失败恢复。
-3. 基于 M1 指标与 M2 结论调整摘要阈值、事实注入预算与检索策略。
-4. 评估是否把 Scholar 深度研究编排迁移到 Session 之上（先验证相对普通聊天的增量价值，单独 ADR）。
-5. 视真实使用情况决定是否引入语义检索；当前保持 FTS5 + 关键词 + 别名。
+1. 补完 M0 手工边界：真实 UI 的允许一次/总是允许/拒绝/超时、运行面板真实 dev server、compact resume 失败恢复。
+2. 基于 M1 指标与 M2 结论调整摘要阈值、事实注入预算与检索策略（用大盘数据观察）。
+3. M4：先验证 Scholar 相对普通聊天的增量价值，再决定研究会话编排。
+4. 视真实使用情况决定是否引入语义检索；当前保持 FTS5 + 关键词 + 别名。

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import shutil
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -11,9 +14,21 @@ from ..config import Settings, resolve_claude_executable
 from ..db import Database, utcnow
 from .health import probe_cli
 
+logger = logging.getLogger("iris.metrics")
+
 RANGES = {"24h": 24 * 3600, "7d": 7 * 24 * 3600, "30d": 30 * 24 * 3600}
 ACTIVE_STATUSES = ("starting", "running", "canceling")
 TERMINAL_STATUSES = ("succeeded", "failed", "canceled", "interrupted")
+ROLLUP_METRICS = {
+    "turns",
+    "turns_succeeded",
+    "turns_failed",
+    "turns_canceled",
+    "turns_interrupted",
+    "cost_usd",
+    "tool_calls",
+    "tool_denials",
+}
 
 
 def _iso_since(seconds: int) -> str:
@@ -100,6 +115,80 @@ def _round(value: float | None, digits: int = 4) -> float | None:
     return None if value is None else round(value, digits)
 
 
+def _floor_bucket(value: datetime, bucket: str) -> datetime:
+    value = value.astimezone(timezone.utc)
+    if bucket == "hour":
+        return value.replace(minute=0, second=0, microsecond=0)
+    return value.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _bucket_series(start: datetime, end: datetime, bucket: str) -> list[datetime]:
+    step = timedelta(hours=1) if bucket == "hour" else timedelta(days=1)
+    points: list[datetime] = []
+    cursor = start
+    while cursor <= end:
+        points.append(cursor)
+        cursor += step
+    return points
+
+
+def _dimension_json_obj(spec: dict[str, Any]) -> str:
+    return json.dumps(spec, sort_keys=True, separators=(",", ":"))
+
+
+def _dimension_keys(role: str | None, project_id: str | None) -> list[str]:
+    specs: list[dict[str, Any]] = [{}]
+    if role:
+        specs.append({"role": role})
+    if project_id:
+        specs.append({"project_id": project_id})
+    if role and project_id:
+        specs.append({"role": role, "project_id": project_id})
+    return [_dimension_json_obj(spec) for spec in specs]
+
+
+def _dimension_for(role: str | None, project_id: str | None) -> str:
+    spec: dict[str, Any] = {}
+    if role:
+        spec["role"] = role
+    if project_id:
+        spec["project_id"] = project_id
+    return _dimension_json_obj(spec)
+
+
+class RollupWorker:
+    """Refreshes hour/day rollups in a daemon thread."""
+
+    def __init__(self, metrics: "MetricsService", interval_seconds: int = 300) -> None:
+        self.metrics = metrics
+        self.interval_seconds = max(30, interval_seconds)
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(
+            target=self._run, name="iris-rollups", daemon=True
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+            self._thread = None
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self.metrics.refresh_rollups("hour", lookback_days=8)
+                self.metrics.refresh_rollups("day", lookback_days=31)
+            except Exception:  # noqa: BLE001 - worker must stay alive
+                logger.exception("metrics.rollup_refresh_failed")
+            self._stop.wait(self.interval_seconds)
+
+
 class MetricsService:
     """Minimal SQL-backed metrics for the M1 observability layer.
 
@@ -109,6 +198,8 @@ class MetricsService:
     def __init__(self, db: Database, settings: Settings) -> None:
         self.db = db
         self.settings = settings
+        self._rollup_lock = threading.Lock()
+        self._health_cache: tuple[float, dict[str, Any]] | None = None
 
     # ------------------------------------------------------------------
     # Overview
@@ -468,9 +559,297 @@ class MetricsService:
         }
 
     # ------------------------------------------------------------------
+    # Rollups / timeseries
+    # ------------------------------------------------------------------
+    def refresh_rollups(self, bucket: str = "hour", lookback_days: int = 8) -> int:
+        if bucket not in {"hour", "day"}:
+            raise ValueError("bucket must be hour or day")
+        with self._rollup_lock:
+            now = datetime.now(timezone.utc)
+            since = now - timedelta(days=lookback_days)
+            start = _floor_bucket(since, bucket)
+            end = _floor_bucket(now, bucket)
+            buckets = {
+                point.isoformat(timespec="seconds"): point
+                for point in _bucket_series(start, end, bucket)
+            }
+            since_iso = since.isoformat(timespec="seconds")
+            values: dict[tuple[str, str, str], float] = {}
+
+            def bump(
+                timestamp: str | None,
+                role: str | None,
+                project_id: str | None,
+                metric: str,
+                amount: float = 1.0,
+            ) -> None:
+                parsed = _parse_time(timestamp)
+                if parsed is None:
+                    return
+                key = _floor_bucket(parsed, bucket).isoformat(timespec="seconds")
+                if key not in buckets:
+                    return
+                for dimension in _dimension_keys(role, project_id):
+                    slot = (key, dimension, metric)
+                    values[slot] = values.get(slot, 0.0) + amount
+
+            for row in self.db.query_all(
+                "SELECT role, project_id, status, cost_usd, created_at "
+                "FROM turns WHERE created_at >= ?",
+                (since_iso,),
+            ):
+                bump(row["created_at"], row["role"], row["project_id"], "turns")
+                if row["status"] in TERMINAL_STATUSES:
+                    bump(
+                        row["created_at"],
+                        row["role"],
+                        row["project_id"],
+                        f"turns_{row['status']}",
+                    )
+                if row["cost_usd"] is not None:
+                    bump(
+                        row["created_at"],
+                        row["role"],
+                        row["project_id"],
+                        "cost_usd",
+                        float(row["cost_usd"]),
+                    )
+
+            for row in self.db.query_all(
+                """
+                SELECT t.role, t.project_id, t.created_at, e.kind
+                FROM turn_events e
+                JOIN turns t ON t.id = e.turn_id
+                WHERE t.created_at >= ?
+                  AND e.kind IN ('tool.use', 'permission.denied')
+                """,
+                (since_iso,),
+            ):
+                metric = "tool_calls" if row["kind"] == "tool.use" else "tool_denials"
+                bump(row["created_at"], row["role"], row["project_id"], metric)
+
+            for row in self.db.query_all(
+                """
+                SELECT t.role, t.project_id, t.created_at
+                FROM turn_approvals a
+                JOIN turns t ON t.id = a.turn_id
+                WHERE t.created_at >= ?
+                  AND a.status IN ('denied', 'expired')
+                """,
+                (since_iso,),
+            ):
+                bump(
+                    row["created_at"],
+                    row["role"],
+                    row["project_id"],
+                    "tool_denials",
+                )
+
+            updated_at = utcnow()
+            with self.db.transaction() as conn:
+                for (bucket_start, dimension, metric), value in values.items():
+                    conn.execute(
+                        """
+                        INSERT INTO metric_rollups
+                            (bucket_start, bucket_size, metric, dimensions_json,
+                             value, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(bucket_start, bucket_size, metric, dimensions_json)
+                        DO UPDATE SET value = excluded.value,
+                                      updated_at = excluded.updated_at
+                        """,
+                        (
+                            bucket_start,
+                            bucket,
+                            metric,
+                            dimension,
+                            value,
+                            updated_at,
+                        ),
+                    )
+                cutoff = (
+                    now
+                    - timedelta(days=400 if bucket == "day" else 90)
+                ).isoformat(timespec="seconds")
+                conn.execute(
+                    "DELETE FROM metric_rollups "
+                    "WHERE bucket_size = ? AND bucket_start < ?",
+                    (bucket, cutoff),
+                )
+            return len(values)
+
+    def timeseries(
+        self,
+        metric: str,
+        *,
+        role: str | None = None,
+        project_id: str | None = None,
+        window: str = "7d",
+        bucket: str | None = None,
+    ) -> dict[str, Any]:
+        if metric not in ROLLUP_METRICS:
+            raise ValueError(
+                f"metric must be one of {sorted(ROLLUP_METRICS)}"
+            )
+        if window not in RANGES:
+            raise ValueError("range must be 24h, 7d, or 30d")
+        if bucket is None:
+            bucket = "hour" if window in {"24h", "7d"} else "day"
+        if bucket not in {"hour", "day"}:
+            raise ValueError("bucket must be hour or day")
+
+        lookback_days = {"24h": 2, "7d": 8, "30d": 31}[window]
+        self.refresh_rollups(bucket, lookback_days=lookback_days)
+
+        now = datetime.now(timezone.utc)
+        start = _floor_bucket(now - timedelta(seconds=RANGES[window]), bucket)
+        end = _floor_bucket(now, bucket)
+        dimension = _dimension_for(role, project_id)
+        rows = self.db.query_all(
+            """
+            SELECT bucket_start, value
+            FROM metric_rollups
+            WHERE metric = ? AND bucket_size = ? AND dimensions_json = ?
+              AND bucket_start >= ?
+            ORDER BY bucket_start
+            """,
+            (
+                metric,
+                bucket,
+                dimension,
+                start.isoformat(timespec="seconds"),
+            ),
+        )
+        by_bucket = {row["bucket_start"]: float(row["value"] or 0) for row in rows}
+        points = []
+        for point in _bucket_series(start, end, bucket):
+            key = point.isoformat(timespec="seconds")
+            points.append({"bucket_start": key, "value": by_bucket.get(key, 0.0)})
+        return {
+            "metric": metric,
+            "bucket": bucket,
+            "range": window,
+            "filters": {"role": role, "project_id": project_id},
+            "points": points,
+        }
+
+    # ------------------------------------------------------------------
+    # Dashboard
+    # ------------------------------------------------------------------
+    def dashboard_overview(
+        self,
+        *,
+        role: str | None = None,
+        project_id: str | None = None,
+        window: str = "24h",
+    ) -> dict[str, Any]:
+        overview = self.overview(role=role, project_id=project_id, window=window)
+        health = self.health(cache_seconds=15)
+        errors = self.recent_errors(
+            role=role, project_id=project_id, window=window, limit=5
+        )
+        return {
+            "generated_at": utcnow(),
+            "range": window,
+            "filters": {"role": role, "project_id": project_id},
+            "health": health,
+            "overview": overview,
+            "alerts": self._alerts(health, overview),
+            "recent_errors": errors,
+        }
+
+    @staticmethod
+    def _alerts(
+        health: dict[str, Any], overview: dict[str, Any]
+    ) -> list[dict[str, str]]:
+        alerts: list[dict[str, str]] = []
+        cli = health.get("cli") or {}
+        if not cli.get("installed"):
+            alerts.append(
+                {
+                    "level": "critical",
+                    "rule": "cli_missing",
+                    "message": "Claude CLI is not installed or cannot be probed.",
+                }
+            )
+        elif cli.get("auth_ok") is False:
+            alerts.append(
+                {
+                    "level": "critical",
+                    "rule": "cli_auth",
+                    "message": "Claude CLI is not authenticated.",
+                }
+            )
+        if not health.get("db_ok"):
+            alerts.append(
+                {
+                    "level": "critical",
+                    "rule": "db_unwritable",
+                    "message": "The SQLite database is not writable.",
+                }
+            )
+        if (health.get("turns") or {}).get("stuck"):
+            alerts.append(
+                {
+                    "level": "critical",
+                    "rule": "stuck_turns",
+                    "message": "An active turn exceeded the run timeout.",
+                }
+            )
+        memory = overview.get("memory") or {}
+        summary_failure = memory.get("summary_failure_rate")
+        if summary_failure is not None and summary_failure >= 0.5:
+            alerts.append(
+                {
+                    "level": "warning",
+                    "rule": "summary_failures",
+                    "message": "At least half of recent summaries failed.",
+                }
+            )
+        storage = overview.get("storage") or {}
+        backup_age = storage.get("backup_age_seconds")
+        if backup_age is not None and backup_age > 7 * 86400:
+            alerts.append(
+                {
+                    "level": "warning",
+                    "rule": "backup_stale",
+                    "message": "The latest backup is older than 7 days.",
+                }
+            )
+        disk_free = storage.get("disk_free_bytes")
+        if disk_free is not None and disk_free < 2 * 1024**3:
+            alerts.append(
+                {
+                    "level": "warning",
+                    "rule": "disk_low",
+                    "message": "Less than 2 GiB of disk space remains.",
+                }
+            )
+        turns = overview.get("turns") or {}
+        if (
+            turns.get("total", 0) >= 5
+            and turns.get("success_rate") is not None
+            and turns["success_rate"] < 0.8
+        ):
+            alerts.append(
+                {
+                    "level": "warning",
+                    "rule": "success_rate",
+                    "message": "Turn success rate is below 80% in this window.",
+                }
+            )
+        return alerts
+
+    # ------------------------------------------------------------------
     # Health
     # ------------------------------------------------------------------
-    def health(self) -> dict[str, Any]:
+    def health(self, cache_seconds: int = 0) -> dict[str, Any]:
+        if (
+            cache_seconds
+            and self._health_cache is not None
+            and time.monotonic() - self._health_cache[0] < cache_seconds
+        ):
+            return self._health_cache[1]
         db_ok = True
         try:
             with self.db.transaction() as conn:
@@ -522,7 +901,7 @@ class MetricsService:
         cli = probe_cli(self.settings)
         sdk_path = resolve_claude_executable(self.settings)
         status = "ok" if db_ok and cli["installed"] and cli["auth_ok"] is not False else "degraded"
-        return {
+        result = {
             "generated_at": utcnow(),
             "status": status,
             "db_ok": db_ok,
@@ -536,6 +915,9 @@ class MetricsService:
             },
             "cli": cli,
         }
+        if cache_seconds:
+            self._health_cache = (time.monotonic(), result)
+        return result
 
     # ------------------------------------------------------------------
     # Recent errors

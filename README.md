@@ -1,6 +1,6 @@
 # Iris
 
-Iris 是一个本地优先的个人工作台：两个角色（**Coding / Scholar**）、Session 聊天、三层记忆，默认通过 **Claude Agent SDK** 驱动本机 Claude Code CLI，并支持交互式工具审批。工作区还可以通过**运行面板**启动、查看日志和停止长驻命令（例如 dev server）。当前版本为 **v8：Session + 三层记忆 + SDK 审批 + 工作区运行面板**。
+Iris 是一个本地优先的个人工作台：两个角色（**Coding / Scholar**）、Session 聊天、三层记忆，默认通过 **Claude Agent SDK** 驱动本机 Claude Code CLI，并支持交互式工具审批。工作区还可以通过**运行面板**启动、查看日志和停止长驻命令（例如 dev server），`/dashboard` 提供健康、成本、记忆与存储大盘。当前版本为 **v9：Session + 三层记忆 + SDK 审批 + 工作区运行面板 + 系统大盘**。
 
 > 对外介绍或演示时，先看一页版概览：[`docs/overview.md`](docs/overview.md)。
 
@@ -42,13 +42,24 @@ Iris 是一个本地优先的个人工作台：两个角色（**Coding / Scholar
 
 ## 最小可观测（M1）
 
-只提供 API，不包含 Dashboard/告警：
-
 - `GET /api/metrics/overview?role=&project_id=&range=24h|7d|30d`：Turn 数/成功率/时长/队列等待、成本、工具调用/拒绝、摘要覆盖/滞后、事实候选/接受/注入、错误与存储。
 - `GET /api/metrics/health`：CLI 探测、DB 可写、活动/stuck Turn、摘要/提取队列。
 - `GET /api/metrics/errors`：最近失败 Turn（截断错误消息，不含正文）。
+- `GET /api/metrics/timeseries?metric=&role=&project_id=&range=&bucket=hour|day`：Turn/成本/工具/拒绝的滚动趋势。
 - 指标只存计数、时长、成本、状态与错误类型；不返回消息、事实正文、prompt 或工具输入输出。
 - 验收：`docs/acceptance/m1-observability.md`。
+
+## 系统大盘（M3）
+
+打开 `/dashboard`（侧栏「系统大盘」）：
+
+- 顶部：CLI/DB/活动 Turn/队列状态、最近更新时间、告警。
+- KPI：Turn 数、成功率、p95 时长、队列等待、成本、每次成功成本、摘要覆盖率/滞后、候选事实。
+- 趋势：Turn 数（柱）与成本（线）；支持 24h/7d/30d、角色、工作区过滤；每 10 秒刷新。
+- 记忆、工具/错误、存储、成本最高的会话。
+- 趋势来自 `metric_rollups`（小时/天桶 + 维度 JSON），后台 worker 每 5 分钟刷新，查询时也会补算；`metric_rollups` 是派生数据，可重建。
+- 告警只在大盘内展示：CLI/DB、stuck Turn、摘要失败、备份过期、磁盘不足、成功率低；不发外部通知。
+- 验收：`docs/acceptance/m3-dashboard.md`。
 
 ## 工作区运行面板
 
@@ -117,18 +128,20 @@ Vite 运行在 5173，并将 `/api` 代理到 8000。前端新增 `react-markdow
 | Coding | 编辑 | `Read,Glob,Grep,Write,Edit` | 修改文件，不执行 shell |
 | Coding | 执行/测试 | 上述 + `PowerShell` | SDK 默认逐条审批；CLI 回退使用项目白名单 |
 | Scholar | 只读 | `Read,Glob,Grep` | 本地阅读与分析 |
-| Scholar | 研究/联网 | `Read,Glob,Grep,WebSearch,WebFetch` | 可使用原生网页工具，不能修改文件 |
+| Scholar | 研究/分析 | `Read,Glob,Grep`（默认） | 本地材料 + 结构化分析，不能修改文件；默认不联网 |
+| Scholar | 研究/分析（Web 可选） | + `WebSearch,WebFetch` | 设置 `IRIS_SCHOLAR_WEB=1` 后启用；需真实来源 |
 
 默认 SDK 模式下，Write/Edit/PowerShell 通过 `can_use_tool` 审批卡片逐条授权，不再要求工作区白名单；CLI 回退模式才使用 `--permission-mode dontAsk` + 白名单和 `--safe-mode`。SDK 使用 `setting_sources=["user"]`（不加载项目/本地设置），并关闭自动 project memory（`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`），但可能加载用户级 hooks/插件；审批不是沙箱，工作区必须可信。
 
 ## 数据与配置
 
 - 默认数据目录：`./data/`（已 gitignore）。
-- 数据库：`data/iris.db`（SQLite WAL，schema v8，启动时非破坏性迁移旧库）。
-- 新表：`sessions`、`turns`、`messages`、`turn_events`、`session_summaries`、`facts`、`fact_extractions`、`facts_fts`、`turn_approvals`、`permission_rules`。
+- 数据库：`data/iris.db`（SQLite WAL，schema v9，启动时非破坏性迁移旧库）。
+- 新表：`sessions`、`turns`、`messages`、`turn_events`、`session_summaries`、`facts`、`fact_extractions`、`facts_fts`、`turn_approvals`、`permission_rules`、`metric_rollups`。
 - 旧表（`tasks`、`runs`、`run_events`、`notes`、`global_notes`、`research_*`）**只读保留，不迁移、不注入、不在新 UI 展示**；`projects` 继续作为工作区库读写。
 - 原始日志：`data/session_logs/<session_id>/<turn_id>.jsonl`（完整、不截断；SDK 后端写入 SDK 消息 JSONL，CLI 回退写入 stream-json；数据库内工具事件会按 `IRIS_MAX_EVENT_PAYLOAD_CHARS` 截断供 UI 使用）。
 - 运行面板日志：`data/workspace_processes/<process_id>.log`（进程内还保留最近 2000 行供网页轮询）。
+- 指标 rollups：`metric_rollups`（schema v9，小时/天桶 + 维度）；派生数据，可删除重建。
 - 无工作区的 Scholar 会话使用 `data/scholar-workspace/`。
 - 日志：`data/logs/iris.log`（5 MB 轮转，保留 3 份）。
 - 备份：`data/backups/`。
@@ -151,6 +164,9 @@ Vite 运行在 5173，并将 `/api` 代理到 8000。前端新增 `react-markdow
 | `IRIS_EXECUTION_BACKEND` | `sdk` | `sdk`（Agent SDK 审批）或 `cli`（回退） |
 | `IRIS_CLAUDE_CLI_PATH` | 自动解析 | SDK 使用的原生 `claude.exe` |
 | `IRIS_APPROVAL_TIMEOUT_SECONDS` | 600 | 工具审批等待超时 |
+| `IRIS_SCHOLAR_WEB` | `0` | Scholar 是否启用 WebSearch/WebFetch；默认关闭，走本地 prompt-first |
+| `IRIS_ROLLUP_WORKER` | `1` | 是否启动指标 rollup 后台 worker（`0` 关闭） |
+| `IRIS_ROLLUP_INTERVAL_SECONDS` | 300 | rollup 刷新间隔 |
 | `IRIS_CLAUDE_COMMAND_JSON` | — | CLI 回退/测试用命令 |
 
 ## 数据维护
@@ -178,7 +194,7 @@ cd frontend
 npm run build
 ```
 
-46 个后端测试通过。测试使用确定性的 fake CLI（CLI 回退）覆盖会话/Turn 执行、SSE 事件、多轮 resume、并发锁、取消与启动校正、原始日志、摘要阈值与失败、compact、事实提取/校验/去重/supersede/注入、作用域与角色过滤、别名召回、schema v8 非破坏迁移、备份与安全头；审批桥接测试覆盖允许/拒绝/always/超时/取消与规则匹配；运行面板测试覆盖启动/日志/停止、参数校验、归档工作区与删除时清理进程；Windows Job Object / taskkill 进程树清理测试覆盖取消与崩溃兜底的基础机制；指标测试覆盖空库、Turn/成本/工具/记忆聚合、过滤与错误隐私；提取作用域测试覆盖跨工作区/角色事实不进入 existing facts。真实 SDK 验证了 T1–T6、Scholar 联网、真实摘要、M2 19 个记忆案例（摘要/提取/更新/召回/隔离/冲突/预算），以及取消长驻命令、强杀恢复；并修复自动 project memory 泄漏与跨工作区 update 目标错误。
+49 个后端测试通过。测试使用确定性的 fake CLI（CLI 回退）覆盖会话/Turn 执行、SSE 事件、多轮 resume、并发锁、取消与启动校正、原始日志、摘要阈值与失败、compact、事实提取/校验/去重/supersede/注入、作用域与角色过滤、别名召回、schema v9 非破坏迁移、备份与安全头；审批桥接测试覆盖允许/拒绝/always/超时/取消与规则匹配；运行面板测试覆盖启动/日志/停止、参数校验、归档工作区与删除时清理进程；Windows Job Object / taskkill 进程树清理测试覆盖取消与崩溃兜底的基础机制；指标测试覆盖空库、Turn/成本/工具/记忆聚合、过滤、错误隐私、rollups/timeseries、dashboard；提取作用域测试覆盖跨工作区/角色事实不进入 existing facts；Scholar Web 开关测试覆盖默认禁用与显式启用。真实 SDK 验证了 T1–T6、Scholar 联网（Web 开启时）、本地 Scholar prompt、真实摘要、M2 19 个记忆案例（摘要/提取/更新/召回/隔离/冲突/预算），以及取消长驻命令、强杀恢复；并修复自动 project memory 泄漏与跨工作区 update 目标错误。
 
 真实服务崩溃测试（会启动并强杀独立后端，使用 Session Turn）：
 
@@ -202,6 +218,7 @@ npm run build
 - 流式增量事件会写入 `turn_events`，历史里会与最终文本合并显示；Turn 结束后以最终 `assistant.text` 为准。
 - CLI 回退模式仍使用白名单，不提供审批卡片。
 - 旧 tasks/runs/notes 数据不迁移、不展示；新模型从空开始。
+- Scholar 默认不联网，基于本地材料/模型知识做结构化分析；需要网页来源时设置 `IRIS_SCHOLAR_WEB=1`，且不得编造来源。
 - Scholar 的多子任务深度研究编排（旧 `research_jobs`）本轮未接入新 UI，代码与表保留。
 - 上下文检索仍基于 FTS5 + 关键词 + 别名，不做 embedding/向量检索。
 - 事实提取质量取决于模型；必须人工审核，服务端只做结构校验与去重。
@@ -209,7 +226,7 @@ npm run build
 - 事实触发只按成功 Turn 数与字符数；没有空闲自动结束会话。
 - 不做自动 git 提交、合并、部署或删除文件。
 - 任务内容会发送给 CLI 配置的模型后端；本地存储不等于数据不出本机。
-- 可观测目前只有 M1 API；没有 Dashboard、timeseries/rollups 与告警；`/api/metrics/health` 会探测 CLI，最长约 20 秒。
+- 大盘告警只在页面内展示，不发外部通知；rollups 只覆盖 Turn/成本/工具/拒绝，记忆趋势仍用窗口聚合；`/api/metrics/health` 会探测 CLI，最长约 20 秒（大盘侧缓存 15 秒）。
 - 认证失败、用户级 hooks/MCP、`--add-dir` 和极长 prompt 尚未系统验证。
 
 ## 目录
@@ -225,8 +242,10 @@ data/           本地运行数据、原始日志、日志和备份（gitignored
 
 ## 路线图与历史
 
-- 后续方向、可观测计划与全局系统大盘：`docs/roadmap.md`（M0 真实验收 → M1 最小可观测 ✅ → M2 记忆质量 → M3 大盘 → M4 Scholar → M5 体验）。
+- 后续方向、可观测计划与全局系统大盘：`docs/roadmap.md`（M0 真实验收 ✅ → M1 最小可观测 ✅ → M2 记忆质量 ✅ → M3 大盘 ✅ → M4 Scholar → M5 体验）。
 - M2 记忆基准：`docs/evaluation/memory-benchmark.md`（19 个案例，真实 SDK 19/19 通过）。
+- M3 大盘验收：`docs/acceptance/m3-dashboard.md`；决策：`docs/decisions/0008-metrics-rollups-dashboard.md`。
+- Scholar 本地 prompt-first：`docs/decisions/0009-scholar-local-prompt.md`（Web 默认关闭，`IRIS_SCHOLAR_WEB=1` 开启）。
 - v7 之前的阶段路线归档：`docs/roadmap-history.md`。
 - Phase 1–3C 的 Task/Run/Note 工作台与 Mentor v0 已归档为只读旧数据，相关决策见 `docs/decisions/`。
 - 当前模型的决策记录见 `docs/decisions/0006-session-memory.md` 与 `docs/decisions/0007-agent-sdk-approvals.md`。

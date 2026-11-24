@@ -42,6 +42,9 @@ def build_command(
     # PowerShell permissions when both are appended together. A role prompt is
     # self-contained and replaces the generic base prompt.
     system_prompt = role_instruction.strip() or BASE_SYSTEM_PROMPT
+    profile_tools = PROFILE_TOOLS[profile]
+    if profile == "research" and not getattr(settings, "scholar_web_enabled", False):
+        profile_tools = "Read,Glob,Grep"
     command = [
         *settings.claude_command,
         "-p",
@@ -54,7 +57,7 @@ def build_command(
         "--max-turns",
         str(max_turns or settings.max_turns),
         "--tools",
-        PROFILE_TOOLS[profile],
+        profile_tools,
     ]
 
     if mode == "resume":
@@ -66,7 +69,11 @@ def build_command(
         if profile == "verify":
             base_allowed = BASE_ALLOWED_FOR_VERIFY
         elif profile == "research":
-            base_allowed = BASE_ALLOWED_FOR_RESEARCH
+            base_allowed = (
+                BASE_ALLOWED_FOR_RESEARCH
+                if getattr(settings, "scholar_web_enabled", False)
+                else ["Read", "Glob", "Grep"]
+            )
         else:
             base_allowed = BASE_ALLOWED_FOR_EXECUTE
         permitted = [*base_allowed]

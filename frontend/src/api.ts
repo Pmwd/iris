@@ -2,6 +2,7 @@ import type {
   Approval,
   ApprovalDecision,
   BackupInfo,
+  DashboardOverviewResponse,
   Extraction,
   Fact,
   FactKind,
@@ -9,6 +10,7 @@ import type {
   FactScope,
   Health,
   ManagedProcess,
+  MetricTimeseries,
   Message,
   PermissionProfile,
   ProcessLogs,
@@ -210,6 +212,22 @@ export const api = {
     request<Extraction[]>(`/fact-extractions${query({ limit })}`),
   getExtraction: (id: string) =>
     request<Extraction>(`/fact-extractions/${id}`),
+
+  getDashboardOverview: (params: {
+    range?: string;
+    role?: RoleId;
+    project_id?: string;
+  } = {}) =>
+    request<DashboardOverviewResponse>(
+      `/dashboard/overview${query(params)}`,
+    ),
+  getMetricTimeseries: (params: {
+    metric: string;
+    range?: string;
+    bucket?: "hour" | "day";
+    role?: RoleId;
+    project_id?: string;
+  }) => request<MetricTimeseries>(`/metrics/timeseries${query(params)}`),
 
   listBackups: () => request<BackupInfo[]>("/maintenance/backups"),
   backup: () => request<BackupInfo>("/maintenance/backup", { method: "POST" }),

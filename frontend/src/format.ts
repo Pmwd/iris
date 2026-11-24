@@ -42,6 +42,38 @@ export function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+export function formatPercent(value: number | null | undefined, digits = 1): string {
+  if (value === null || value === undefined) return "—";
+  return `${(value * 100).toFixed(digits)}%`;
+}
+
+export function formatSeconds(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  const seconds = Math.max(0, Math.round(value));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${seconds % 60}s`;
+}
+
+export function formatBytes(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index += 1;
+  }
+  return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+export function formatAge(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined) return "—";
+  if (seconds < 3600) return `${Math.max(0, Math.round(seconds / 60))}m`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}h`;
+  return `${Math.round(seconds / 86400)}d`;
+}
+
 export function asText(value: unknown): string {
   if (typeof value === "string") return value;
   try {

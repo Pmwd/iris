@@ -117,6 +117,9 @@ export function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
+        <Link className="sidebar-link" to="/dashboard">
+          系统大盘
+        </Link>
         <Link className="sidebar-link" to="/memory">
           记忆库
           {candidates ? <span className="count-badge">{candidates}</span> : null}

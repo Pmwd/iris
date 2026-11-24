@@ -1,7 +1,7 @@
 # Iris 项目概览（一页版）
 
 > 用途：对外介绍 / 演示 / 快速理解项目现状。  
-> 更新时间：2026-11-24 · 版本：v8（Session + 三层记忆 + 双角色 + SDK 审批 + 工作区运行面板）  
+> 更新时间：2026-11-24 · 版本：v9（Session + 三层记忆 + 双角色 + SDK 审批 + 工作区运行面板 + 系统大盘）  
 > 技术细节见 `README.md`、`CURRENT_PHASE.md`、`docs/roadmap.md`。
 
 ## 1. 一句话
@@ -50,7 +50,7 @@
 
 | 维度 | 状态 |
 |---|---|
-| 版本 | schema v8；旧 Task/Run/Note 数据只读保留 |
+| 版本 | schema v9；旧 Task/Run/Note 数据只读保留 |
 | 角色 | Coding、Scholar 两个活动角色 |
 | 会话 | 多会话；SDK 首次新 session、后续 resume；SSE 增量文本 + 工具事件 |
 | 执行与审批 | Claude Agent SDK；`can_use_tool` 逐条审批；会话级 permission rules |
@@ -59,11 +59,11 @@
 | L3 长期事实 | 手动提取 → 服务端校验/去重 → 人工审核 → 才注入 |
 | 前端 | 三栏聊天工作台、工具卡片、审批卡片、记忆审核、工作区、运行面板 |
 | 运行面板 | 工作区内启动/停止长驻命令、PID/退出码、实时日志（内存 + 文件） |
-| 自动化 | 46 个后端测试通过；前端构建通过；崩溃恢复脚本通过 |
+| 自动化 | 49 个后端测试通过；前端构建通过；崩溃恢复脚本通过 |
 | 真实 CLI | T1–T6、Scholar 联网、真实摘要通过；剩余手工审批边界/dev server/compact |
-| 最小可观测 | ✅ M1 API：overview / health / errors；无 Dashboard/告警 |
+| 最小可观测 | ✅ M1 API：overview / health / errors / timeseries |
 | 记忆质量 | ✅ M2 19/19（摘要/提取/更新/召回/隔离/冲突/预算/manifest） |
-| 系统大盘 | **尚未实现**，已列入 roadmap M3（M1 最小可观测 → M2 记忆质量 → M3 大盘） |
+| 系统大盘 | ✅ M3 `/dashboard`：KPI、趋势、告警、记忆/工具/存储；无外部通知 |
 
 ## 4. 架构（单进程、本地优先）
 
@@ -108,7 +108,7 @@ SQLite WAL + data/session_logs/<session>/<turn>.jsonl
 | 角色 | 用途 | 工作区 | 权限档位 |
 |---|---|---|---|
 | Coding | 修改代码、运行测试、交付改动 | 必须绑定 | 只读 / 编辑 / 执行（SDK 逐条审批；CLI 回退用白名单） |
-| Scholar | 研究问题、区分事实/观点/假设、保留来源 | 可选 | 只读 / 研究（原生 WebSearch / WebFetch） |
+| Scholar | 研究问题、区分 KNOWN/INFERRED/HYPOTHESIS/UNKNOWN、暴露反例与未知 | 可选 | 只读 / 研究/分析（默认不联网；`IRIS_SCHOLAR_WEB=1` 可启用 Web） |
 
 角色是**策略层**：行为、工具权限、上下文策略的组合；不是独立 Agent、模型或记忆库。
 
@@ -116,12 +116,13 @@ SQLite WAL + data/session_logs/<session>/<turn>.jsonl
 
 ## 7. 质量与验证
 
-- **自动化**：`pytest backend/tests -q` → 46 个测试通过；`npm run build` 通过。
+- **自动化**：`pytest backend/tests -q` → 49 个测试通过；`npm run build` 通过。
 - **审批**：允许/拒绝/总是允许/超时/取消与规则匹配有单测；本机 `claude.exe` + CC Switch/DeepSeek 下真实验证过 PowerShell 审批、文件生成与 resume。
 - **可靠性**：`scripts/crash_test.py` 验证强杀后端后 CLI 子进程被清理，重启后 Turn 校正为 `interrupted`。
 - **并发**：同一 Session 一个活动 Turn；同一工作区一个活动 Coding Turn（DB 部分唯一索引兜底）。
 - **可追溯**：每次 Turn 保存注入事实清单、字符数、是否注入摘要；审批记录写入 `turn_approvals`；原始日志可下载。
-- **待验证**：Scholar 联网、真实摘要语义质量、事实提取信噪比、完整审批手工流程。
+- **Scholar**：默认本地 prompt-first（不联网）；Web 模式历史验收通过，需显式开启。
+- **待验证**：完整审批手工流程、运行面板真实 dev server、compact 恢复。
 
 ## 8. 当前限制（介绍时建议主动说明）
 
@@ -134,7 +135,7 @@ SQLite WAL + data/session_logs/<session>/<turn>.jsonl
 - 摘要/事实提取需要额外 CLI 调用，会产生成本；默认单 worker 串行。
 - 事实提取质量取决于模型；必须人工审核。
 - 旧 tasks/runs/notes 数据不迁移、不展示。
-- 可观测目前是 M1 API；还没有应用内 Dashboard、timeseries/rollups 与告警（M3）。
+- 大盘告警只在页面内展示，不发外部通知；rollups 只覆盖 Turn/成本/工具/拒绝；记忆/存储趋势仍用窗口聚合。
 
 ## 9. 下一步路线（摘要）
 
@@ -143,7 +144,7 @@ SQLite WAL + data/session_logs/<session>/<turn>.jsonl
 | **M0 真实验收** | T1–T6、审批全流程、Scholar、真实摘要与阻塞修复 |
 | **M1 最小可观测** | ✅ Token/耗时/成功率/健康/错误 API；暂不做告警 |
 | **M2 记忆质量** | ✅ 19/19 案例通过（真实 SDK） |
-| **M3 全局大盘** | rollups + `/dashboard`：健康、活动、成本、记忆、存储 |
+| **M3 全局大盘** | ✅ rollups + `/dashboard`：健康、活动、成本、记忆、存储 |
 | **M4 Scholar 深度** | 先验证增量价值，再研究会话编排、来源与候选事实 |
 | **M5 体验** | 通知、会话搜索、导出、移动端 |
 
@@ -154,7 +155,7 @@ SQLite WAL + data/session_logs/<session>/<turn>.jsonl
 1. **30 秒定位**：Iris 不是聊天工具，而是把“执行 → 原始记录 → 会话摘要 → 审核后的长期事实”串起来的本地工作台。
 2. **60 秒演示**：打开 Coding → 新会话 → 发任务 → 工具卡片 → 审批卡片允许一次 → 结束会话生成摘要 → 记忆库提取事实并接受 → 新会话看到事实注入。
 3. **60 秒讲架构**：两个角色 + Session/Turn；三层记忆；SDK 执行 + 逐条审批；SQLite + JSONL；权限档位与并发锁。
-4. **30 秒讲现状**：46 个测试、构建与崩溃恢复通过；SDK 审批真实冒烟通过；T4–T6 真实验收通过；M1 最小可观测已实现；M2 记忆 19/19 通过；下一步补齐 Scholar/摘要验收，再做全局大盘与 Scholar 深度。
+4. **30 秒讲现状**：49 个测试、构建与崩溃恢复通过；M0 T1–T6 + 本地 Scholar + 摘要通过；M1 可观测、M2 记忆 19/19、M3 系统大盘已实现；下一步补手工审批边界与 Scholar 深度。
 
 ## 11. 在哪里看
 
@@ -163,14 +164,17 @@ SQLite WAL + data/session_logs/<session>/<turn>.jsonl
 | 项目定位、启动、配置、限制 | `README.md` |
 | 当前阶段与验收状态 | `CURRENT_PHASE.md` |
 | 后续方向、可观测计划、全局大盘设计 | `docs/roadmap.md` |
-| v8 架构决策（Session/三层记忆） | `docs/decisions/0006-session-memory.md` |
+| Session/三层记忆决策 | `docs/decisions/0006-session-memory.md` |
 | SDK 执行与审批决策 | `docs/decisions/0007-agent-sdk-approvals.md` |
+| 指标 rollups 与大盘决策 | `docs/decisions/0008-metrics-rollups-dashboard.md` |
+| Scholar 本地 prompt-first 决策 | `docs/decisions/0009-scholar-local-prompt.md` |
 | M0 验收矩阵（T1–T6） | `docs/acceptance/m0-real-cli.md` |
 | M1 可观测验收 | `docs/acceptance/m1-observability.md` |
 | M2 记忆案例集 | `docs/evaluation/memory-benchmark.md` |
 | 真实 SDK 验收步骤 | `docs/acceptance/phase4-sessions.md` |
 | 演示截图 | `docs/assets/overview-*.png` |
-| 实际界面 | 启动后访问 <http://127.0.0.1:8000>；页面包括 `/:role`、`/:role/:sessionId`、`/memory`、`/workspaces` |
+| M3 大盘验收 | `docs/acceptance/m3-dashboard.md` |
+| 实际界面 | 启动后访问 <http://127.0.0.1:8000>；页面包括 `/:role`、`/:role/:sessionId`、`/dashboard`、`/memory`、`/workspaces` |
 
 启动方式：双击仓库根目录 `start.bat`，或：
 

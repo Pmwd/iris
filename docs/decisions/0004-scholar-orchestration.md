@@ -1,5 +1,7 @@
 # ADR 0004：Scholar 编排层与原生网页工具
 
+> 2026-11-24 调整：Scholar 默认改为本地 prompt-first，WebSearch/WebFetch 默认关闭；Web 模式需 `IRIS_SCHOLAR_WEB=1`。见 ADR 0009。本 ADR 保留历史决策与原型记录。
+
 - 状态：原型已实现；第一个真实任务部分子任务失败，等待可靠性修正和第二轮复用验证
 - 日期：2026-10-24（更新于 2026-10-25）
 - 关联：`docs/evaluation/paraphrase-recall.md`、`docs/acceptance/phase3a.md`

@@ -35,6 +35,8 @@ def _make_settings(root: Path, **overrides) -> Settings:
         max_context_chars=4000,
         max_event_payload_chars=4000,
         sse_poll_seconds=0.05,
+        rollup_worker_enabled=False,
+        scholar_web_enabled=False,
         summary_trigger_turns=1000,
         summary_trigger_chars=10_000_000,
         summary_input_max_chars=30000,

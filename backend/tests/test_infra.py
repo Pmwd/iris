@@ -8,6 +8,7 @@ from app.config import Settings
 from app.db import Database
 from app.repository import Repository
 from app.services.prompts import build_turn_prompt
+from app.services.sdk_runner import _disallowed_tools
 from tests.conftest import (
     HEADERS,
     create_session,
@@ -50,8 +51,20 @@ def test_command_builder_flags():
 
     research = build_command(settings, "sid", "new", "research", [])
     joined = " ".join(research)
-    assert "WebSearch" in joined
-    assert "WebFetch" in joined
+    assert "WebSearch" not in joined
+    assert "WebFetch" not in joined
+    assert "Read,Glob,Grep" in joined
+
+    web_settings = Settings(
+        data_dir=Path("."),
+        db_path=Path("."),
+        claude_command=["claude"],
+        scholar_web_enabled=True,
+    )
+    web_research = build_command(web_settings, "sid", "new", "research", [])
+    web_joined = " ".join(web_research)
+    assert "WebSearch" in web_joined
+    assert "WebFetch" in web_joined
 
 
 def test_prompt_builder_delimits_reference_data():
@@ -151,7 +164,7 @@ def test_spawn_failure_marks_turn_failed(client_factory):
     assert turn["error_type"] == "cli_spawn_failed"
 
 
-def test_schema_v8_is_non_destructive(tmp_path: Path):
+def test_schema_v9_is_non_destructive(tmp_path: Path):
     db_path = tmp_path / "iris.db"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -191,12 +204,13 @@ def test_schema_v8_is_non_destructive(tmp_path: Path):
                 "session_summaries",
                 "turn_approvals",
                 "permission_rules",
+                "metric_rollups",
             )
         }
     finally:
         conn.close()
 
-    assert version == 8
+    assert version == 9
     for table in (
         "sessions",
         "turns",
@@ -208,6 +222,7 @@ def test_schema_v8_is_non_destructive(tmp_path: Path):
         "facts_fts",
         "turn_approvals",
         "permission_rules",
+        "metric_rollups",
     ):
         assert table in tables
     assert counts["projects"] == 1
@@ -215,3 +230,15 @@ def test_schema_v8_is_non_destructive(tmp_path: Path):
     assert counts["notes"] == 1
     assert counts["sessions"] == 0
     assert counts["facts"] == 0
+
+
+def test_scholar_web_toggle_in_sdk_tools():
+    assert "WebSearch" in _disallowed_tools("research")
+    assert "WebFetch" in _disallowed_tools("research")
+    assert "PowerShell" in _disallowed_tools("research")
+
+    enabled = _disallowed_tools("research", web_enabled=True)
+    assert "WebSearch" not in enabled
+    assert "WebFetch" not in enabled
+    assert "PowerShell" in enabled
+    assert "Write" in enabled

@@ -13,21 +13,21 @@ export const ROLE_LABELS: Record<RoleId, string> = {
 
 export const ROLE_DESCRIPTIONS: Record<RoleId, string> = {
   coding: "修改本地工作区代码、运行测试、交付改动。",
-  scholar: "研究问题、区分事实/观点/假设、保留来源。",
+  scholar: "研究问题、区分事实/推断/假设、暴露反例与未知。",
 };
 
 export const PROFILE_LABELS: Record<PermissionProfile, string> = {
   read_only: "只读",
   edit: "编辑",
   execute: "执行/测试",
-  research: "研究/联网",
+  research: "研究/分析",
 };
 
 export const PROFILE_HINTS: Record<PermissionProfile, string> = {
   read_only: "分析，不修改文件",
   edit: "修改文件，不执行命令",
   execute: "允许白名单 PowerShell",
-  research: "允许 WebSearch / WebFetch",
+  research: "本地阅读 + 结构化分析（默认不联网）",
 };
 
 export const FACT_KINDS: FactKind[] = [

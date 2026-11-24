@@ -10,6 +10,17 @@ router = APIRouter()
 
 RoleFilter = Literal["coding", "scholar"]
 RangeFilter = Literal["24h", "7d", "30d"]
+BucketFilter = Literal["hour", "day"]
+MetricFilter = Literal[
+    "turns",
+    "turns_succeeded",
+    "turns_failed",
+    "turns_canceled",
+    "turns_interrupted",
+    "cost_usd",
+    "tool_calls",
+    "tool_denials",
+]
 
 
 def _metrics(request: Request) -> MetricsService:
@@ -34,6 +45,42 @@ def metrics_overview(
 @router.get("/metrics/health")
 def metrics_health(request: Request) -> dict:
     return _metrics(request).health()
+
+
+@router.get("/metrics/timeseries")
+def metrics_timeseries(
+    request: Request,
+    metric: MetricFilter,
+    role: RoleFilter | None = None,
+    project_id: str | None = None,
+    window: RangeFilter = Query("7d", alias="range"),
+    bucket: BucketFilter | None = None,
+) -> dict:
+    try:
+        return _metrics(request).timeseries(
+            metric,
+            role=role,
+            project_id=project_id,
+            window=window,
+            bucket=bucket,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/dashboard/overview")
+def dashboard_overview(
+    request: Request,
+    role: RoleFilter | None = None,
+    project_id: str | None = None,
+    window: RangeFilter = Query("24h", alias="range"),
+) -> dict:
+    try:
+        return _metrics(request).dashboard_overview(
+            role=role, project_id=project_id, window=window
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/metrics/errors")

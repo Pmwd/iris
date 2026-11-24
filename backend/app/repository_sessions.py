@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from typing import Any, Iterable
 from uuid import uuid4
 

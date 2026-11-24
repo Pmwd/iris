@@ -85,8 +85,14 @@ def _kill_tree(pid: int) -> None:
         logger.exception("sdk.kill_tree_failed pid=%s", pid)
 
 
-def _disallowed_tools(profile: str) -> list[str]:
-    no_web = ["WebSearch", "WebFetch"]
+def _disallowed_tools(
+    profile: str, *, web_enabled: bool = False
+) -> list[str]:
+    web = (
+        []
+        if profile == "research" and web_enabled
+        else ["WebSearch", "WebFetch"]
+    )
     subagents = ["Agent", "Task"]
     if profile == "read_only":
         return [
@@ -96,13 +102,13 @@ def _disallowed_tools(profile: str) -> list[str]:
             "NotebookEdit",
             "PowerShell",
             "Bash",
-            *no_web,
+            *web,
             *subagents,
         ]
     if profile == "edit":
-        return ["PowerShell", "Bash", *no_web, *subagents]
+        return ["PowerShell", "Bash", *web, *subagents]
     if profile == "execute":
-        return [*no_web, *subagents]
+        return [*web, *subagents]
     if profile == "research":
         return [
             "Write",
@@ -111,9 +117,10 @@ def _disallowed_tools(profile: str) -> list[str]:
             "NotebookEdit",
             "PowerShell",
             "Bash",
+            *web,
             *subagents,
         ]
-    return [*no_web, *subagents]
+    return [*web, *subagents]
 
 
 class SdkTurnRunner:
@@ -367,7 +374,9 @@ class SdkTurnRunner:
             cwd=str(workspace),
             permission_mode="default",
             can_use_tool=can_use_tool,
-            disallowed_tools=_disallowed_tools(profile),
+            disallowed_tools=_disallowed_tools(
+                profile, web_enabled=self.settings.scholar_web_enabled
+            ),
             resume=resume or None,
             max_turns=self.settings.max_turns,
             system_prompt=role_instruction or None,

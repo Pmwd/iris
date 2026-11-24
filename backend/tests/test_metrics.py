@@ -141,3 +141,89 @@ def test_metrics_empty_database(client_factory):
     health = client.get("/api/metrics/health")
     assert health.status_code == 200
     assert health.json()["turns"]["active"] == 0
+
+
+def test_timeseries_rollups_and_filters(app_client):
+    client, workspace = app_client
+    project = create_workspace(client, workspace)
+    session = create_session(client, project_id=project["id"])
+    send_and_wait(client, session["id"], "hello", profile="read_only")
+    send_and_wait(client, session["id"], "FAIL for timeseries", profile="read_only")
+
+    response = client.get(
+        "/api/metrics/timeseries",
+        params={
+            "metric": "turns",
+            "range": "24h",
+            "bucket": "hour",
+            "role": "coding",
+            "project_id": project["id"],
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["metric"] == "turns"
+    assert data["bucket"] == "hour"
+    assert data["points"]
+    assert sum(point["value"] for point in data["points"]) >= 2
+
+    cost = client.get(
+        "/api/metrics/timeseries",
+        params={
+            "metric": "cost_usd",
+            "range": "24h",
+            "bucket": "hour",
+            "project_id": project["id"],
+        },
+    )
+    assert cost.status_code == 200
+    assert sum(point["value"] for point in cost.json()["points"]) > 0
+
+    scholar = client.get(
+        "/api/metrics/timeseries",
+        params={
+            "metric": "turns",
+            "range": "24h",
+            "bucket": "hour",
+            "role": "scholar",
+            "project_id": project["id"],
+        },
+    )
+    assert scholar.status_code == 200
+    assert sum(point["value"] for point in scholar.json()["points"]) == 0
+
+    assert (
+        client.get(
+            "/api/metrics/timeseries",
+            params={"metric": "bogus", "range": "24h"},
+        ).status_code
+        == 422
+    )
+    assert (
+        client.get(
+            "/api/metrics/timeseries",
+            params={"metric": "turns", "range": "24h", "bucket": "week"},
+        ).status_code
+        == 422
+    )
+
+
+def test_dashboard_overview(app_client):
+    client, workspace = app_client
+    project = create_workspace(client, workspace)
+    session = create_session(client, project_id=project["id"])
+    send_and_wait(client, session["id"], "FAIL for dashboard", profile="read_only")
+
+    response = client.get(
+        "/api/dashboard/overview",
+        params={"range": "24h", "role": "coding", "project_id": project["id"]},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["range"] == "24h"
+    assert data["generated_at"]
+    assert data["health"]["db_ok"] is True
+    assert data["overview"]["turns"]["failed"] >= 1
+    assert isinstance(data["alerts"], list)
+    assert isinstance(data["recent_errors"], list)
+    assert data["recent_errors"]
