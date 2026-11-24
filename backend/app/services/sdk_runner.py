@@ -374,7 +374,13 @@ class SdkTurnRunner:
             include_partial_messages=True,
             setting_sources=["user"],
             stderr=stderr_cb,
-            env={"CLAUDE_AGENT_SDK_CLIENT_APP": "Iris"},
+            env={
+                "CLAUDE_AGENT_SDK_CLIENT_APP": "Iris",
+                # Claude Code auto-loads project memory files based on cwd.
+                # Iris has its own reviewed memory and manifest; auto memory
+                # would inject context that never appears in the manifest.
+                "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+            },
         )
 
         raw_file = None

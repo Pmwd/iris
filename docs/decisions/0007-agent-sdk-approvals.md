@@ -53,6 +53,7 @@ v7 的 Turn 是“一次性 `claude -p` + 预授权 PowerShell 白名单”。�
 
 - `cli_path` 指向原生 `claude.exe`；Windows 上 npm 的 `claude.cmd` 不被 SDK 直接接受，Iris 会从 shim 推导或使用 `IRIS_CLAUDE_CLI_PATH`。
 - `setting_sources=["user"]`：保留用户的 CC Switch/DeepSeek 配置，不加载项目/本地设置；用户级 hooks/插件仍可能加载。
+- `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`：关闭 Claude Code 按 cwd 自动加载的 project memory。实测工作区位于 Git 仓库内时，SDK 会加载 `memory_paths`，把未进入 Iris manifest 的内容暴露给模型（M2 C3 冒烟发现）；Iris 只使用自己的三层记忆与 manifest。
 - `system_prompt` 使用角色自包含指令；`resume` 使用 session 的 `cli_session_id`；`max_turns` 沿用配置。
 - `ResultMessage.total_cost_usd`、`usage`、`model_usage` 写入 Turn；原始 SDK 消息写入 JSONL。
 - 未把 `model` 写死，保持 CC Switch/DeepSeek 的路由。

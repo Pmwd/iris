@@ -18,6 +18,7 @@ from .repository_facts import FactRepository
 from .repository_sessions import SessionRepository
 from .services.approvals import ApprovalManager
 from .services.memory import MemoryManager
+from .services.metrics import MetricsService
 from .services.processes import WorkspaceProcessManager
 from .services.sessions import SessionManager
 
@@ -51,6 +52,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     memory_manager = MemoryManager(repo, session_repo, fact_repo, settings)
     memory_manager.reconcile()
     process_manager = WorkspaceProcessManager(repo, settings)
+    metrics = MetricsService(database, settings)
     session_manager = SessionManager(
         repo,
         session_repo,
@@ -84,6 +86,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.session_manager = session_manager
     app.state.memory_manager = memory_manager
     app.state.process_manager = process_manager
+    app.state.metrics = metrics
 
     def guarded_error(detail: str, status_code: int) -> JSONResponse:
         response = JSONResponse({"detail": detail}, status_code=status_code)

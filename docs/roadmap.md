@@ -1,7 +1,7 @@
 # Iris 路线图（v8 之后）
 
-> 状态：Phase 4（Session + 三层记忆 + 双角色 + SDK 审批）已实现并通过自动化验收；SDK 审批真实冒烟通过，完整端到端验收待执行  
-> 更新时间：2026-11-23  
+> 状态：M0 T4–T6 真实验收通过；M1 最小可观测已实现；M2 冒烟 5/5 通过（其余案例待执行）  
+> 更新时间：2026-11-24  
 > 本文件：后续方向讨论机制、可观测计划、全局系统大盘、里程碑与优先级  
 > 当前阶段：`CURRENT_PHASE.md` · 历史路线：`docs/roadmap-history.md` · 决策：`docs/decisions/` · 验收：`docs/acceptance/`
 
@@ -181,7 +181,7 @@ ADR 状态：`提议 / 已采用 / 已取代 / 已放弃`。方向被放弃也�
 
 ### 4.4 实现阶段
 
-**O1 — 指标层 + 健康/错误 API（M1，约 1 周，不改 schema）**
+**O1 — 指标层 + 健康/错误 API（M1，✅ 已实现 2026-11-24，不改 schema）**
 
 - 新增 `backend/app/services/metrics.py`：用 SQL 聚合上述指标；结果内存缓存 10 秒。
 - 新增 `GET /api/metrics/overview?role=&project_id=&range=24h|7d|30d`。
@@ -190,6 +190,7 @@ ADR 状态：`提议 / 已采用 / 已取代 / 已放弃`。方向被放弃也�
 - 同时埋记忆相关计数：事实注入率、事实使用 Top、摘要成本与滞后，供 M2 使用。
 - 暂不做 `timeseries`、rollups 和告警；M1 的目标是能手工查数、能对账。
 - 测试：用 seeded fake CLI 数据核对 SQL 聚合；范围过滤；不泄露内容。
+- 验收：`docs/acceptance/m1-observability.md`（3 个指标测试，全量 45 个后端测试）。
 
 **O2 — 滚动汇总（M3 大盘前，约 3–5 天）**
 
@@ -303,7 +304,7 @@ ADR 状态：`提议 / 已采用 / 已取代 / 已放弃`。方向被放弃也�
 
 ### 6.0 真实案例集（10–20 个）
 
-先做一组可重复的真实案例，作为后续所有记忆改动的基线。记录在 `docs/evaluation/`。
+先做一组可重复的真实案例，作为后续所有记忆改动的基线。案例集见 `docs/evaluation/memory-benchmark.md`（19 个案例；**冒烟 A1/B1/B4/C1/C3 已通过**，其余待执行）。
 
 | 类别 | 建议数量 | 观察点 |
 |---|---|---|
@@ -369,8 +370,8 @@ ADR 状态：`提议 / 已采用 / 已取代 / 已放弃`。方向被放弃也�
 | 里程碑 | 内容 | 交付 | 验收 | 依赖 |
 |---|---|---|---|---|
 | **M0 真实验收** | T1–T6 + 审批全流程 + Scholar 联网 + 真实摘要 | 验收记录、阻塞问题修复 | `docs/acceptance/m0-real-cli.md` 全部通过 | 无 |
-| **M1 最小可观测** | O1 指标层 + 健康/错误 API（不做告警） | `services/metrics.py`、`/api/metrics/*`、测试 | 指标与 SQL 对账；范围/过滤；无内容泄露 | M0 基本通过 |
-| **M2 记忆质量验证** | 10–20 个真实案例 + 结论 | 评估记录、prompt/去重调整结论 | 摘要保留、事实正确、跨 Session 召回、冲突可控 | M1 有数据 |
+| **M1 最小可观测** | ✅ O1 指标层 + 健康/错误 API（不做告警） | `services/metrics.py`、`/api/metrics/*`、45 个测试 | 指标与 SQL 对账；范围/过滤；无内容泄露 | M0 基本通过 |
+| **M2 记忆质量验证** | 10–20 个真实案例 + 结论（冒烟 5/5 通过） | `docs/evaluation/memory-benchmark.md`、评估记录、调整结论 | 摘要保留、事实正确、跨 Session 召回、冲突可控 | M1 有数据 |
 | **M3 全局大盘** | O2 rollups + `/dashboard` + 可选告警 | 大盘页面、组合 API、下钻 | 一屏回答五个问题；下钻可用；构建通过 | M1 + M2 |
 | **M4 Scholar 深度** | 先验证增量，再研究会话编排 | 对比记录；子会话、来源、汇总、候选事实 | 真实研究任务成功率与来源质量 | Q5 有证据 |
 | **M5 体验打磨** | 通知、搜索、导出、移动端 | 可用性改进 | 真实使用摩擦下降 | M3 |
@@ -382,9 +383,9 @@ ADR 状态：`提议 / 已采用 / 已取代 / 已放弃`。方向被放弃也�
 
 ### 现在做
 
-1. M0：真实 SDK 验收（T1–T6、审批全流程、Scholar、摘要）与阻塞修复。
-2. M1：最小指标层 + 健康/错误 API，先回答“系统是否健康、在做什么、花了多少”。
-3. M2：记忆质量验证（10–20 个真实案例），先确认核心差异化是否成立。
+1. M0：真实 SDK 验收（T1–T6、审批全流程、Scholar、摘要）与阻塞修复；T4–T6 已通过。
+2. M1：✅ 最小指标层 + 健康/错误 API 已实现。
+3. M2：按 `docs/evaluation/memory-benchmark.md` 执行 10–20 个真实案例，确认核心差异化。
 
 ### 之后做（有数据再定）
 
@@ -441,6 +442,7 @@ ADR 状态：`提议 / 已采用 / 已取代 / 已放弃`。方向被放弃也�
 
 - v7 之前的完整路线图：`docs/roadmap-history.md`
 - 关键决策：`docs/decisions/0001`–`0007`
-- 验收记录：`docs/acceptance/phase1`–`phase4-sessions`；M0 真实矩阵见 `docs/acceptance/m0-real-cli.md`
+- 验收记录：`docs/acceptance/phase1`–`phase4-sessions`；M0 真实矩阵见 `docs/acceptance/m0-real-cli.md`；M1 见 `docs/acceptance/m1-observability.md`
+- 记忆基准：`docs/evaluation/memory-benchmark.md`
 - 评估记录：`docs/evaluation/`
 - 旧数据：`tasks` / `runs` / `notes` / `research_*` 只读保留，不迁移、不进入新 UI/上下文。

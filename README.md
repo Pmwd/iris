@@ -38,6 +38,17 @@ Iris 是一个本地优先的个人工作台：两个角色（**Coding / Scholar
 - 每个 Turn 的 `claude.exe` 会附加到独立 Windows Job Object；取消或异常退出时整棵进程树（含 PowerShell/python 工具进程）一起结束。
 - `IRIS_EXECUTION_BACKEND=cli` 可回退到旧的 one-shot CLI 白名单模式（测试和 fake CLI 使用）。
 - **审批不是沙箱**：批准的命令仍以 Iris 后端用户身份执行；SDK 使用用户设置（`setting_sources=["user"]`），请只打开可信工作区。
+- SDK 设置 `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`：关闭 Claude Code 按 cwd 自动加载的 project memory，避免未进入 Iris manifest 的内容被模型看到；Iris 只使用自己的三层记忆。
+
+## 最小可观测（M1）
+
+只提供 API，不包含 Dashboard/告警：
+
+- `GET /api/metrics/overview?role=&project_id=&range=24h|7d|30d`：Turn 数/成功率/时长/队列等待、成本、工具调用/拒绝、摘要覆盖/滞后、事实候选/接受/注入、错误与存储。
+- `GET /api/metrics/health`：CLI 探测、DB 可写、活动/stuck Turn、摘要/提取队列。
+- `GET /api/metrics/errors`：最近失败 Turn（截断错误消息，不含正文）。
+- 指标只存计数、时长、成本、状态与错误类型；不返回消息、事实正文、prompt 或工具输入输出。
+- 验收：`docs/acceptance/m1-observability.md`。
 
 ## 工作区运行面板
 
@@ -108,7 +119,7 @@ Vite 运行在 5173，并将 `/api` 代理到 8000。前端新增 `react-markdow
 | Scholar | 只读 | `Read,Glob,Grep` | 本地阅读与分析 |
 | Scholar | 研究/联网 | `Read,Glob,Grep,WebSearch,WebFetch` | 可使用原生网页工具，不能修改文件 |
 
-默认 SDK 模式下，Write/Edit/PowerShell 通过 `can_use_tool` 审批卡片逐条授权，不再要求工作区白名单；CLI 回退模式才使用 `--permission-mode dontAsk` + 白名单和 `--safe-mode`。SDK 使用 `setting_sources=["user"]`（不加载项目/本地设置），但可能加载用户级 hooks/插件；审批不是沙箱，工作区必须可信。
+默认 SDK 模式下，Write/Edit/PowerShell 通过 `can_use_tool` 审批卡片逐条授权，不再要求工作区白名单；CLI 回退模式才使用 `--permission-mode dontAsk` + 白名单和 `--safe-mode`。SDK 使用 `setting_sources=["user"]`（不加载项目/本地设置），并关闭自动 project memory（`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`），但可能加载用户级 hooks/插件；审批不是沙箱，工作区必须可信。
 
 ## 数据与配置
 
@@ -167,7 +178,7 @@ cd frontend
 npm run build
 ```
 
-42 个后端测试通过。测试使用确定性的 fake CLI（CLI 回退）覆盖会话/Turn 执行、SSE 事件、多轮 resume、并发锁、取消与启动校正、原始日志、摘要阈值与失败、compact、事实提取/校验/去重/supersede/注入、作用域与角色过滤、别名召回、schema v8 非破坏迁移、备份与安全头；审批桥接测试覆盖允许/拒绝/always/超时/取消与规则匹配；运行面板测试覆盖启动/日志/停止、参数校验、归档工作区与删除时清理进程；Windows Job Object / taskkill 进程树清理测试覆盖取消与崩溃兜底的基础机制。真实 SDK 审批已用本机 CLI + CC Switch/DeepSeek 冒烟（PowerShell 允许、文件生成、resume、成本）；真实 SDK 还验证了事实注入/召回（manifest matched + use_count）、取消长驻命令（工具进程终止、状态 canceled、可继续）、强杀后端后的恢复（CLI 树清理、Turn interrupted、审批 expired、锁释放）。
+45 个后端测试通过。测试使用确定性的 fake CLI（CLI 回退）覆盖会话/Turn 执行、SSE 事件、多轮 resume、并发锁、取消与启动校正、原始日志、摘要阈值与失败、compact、事实提取/校验/去重/supersede/注入、作用域与角色过滤、别名召回、schema v8 非破坏迁移、备份与安全头；审批桥接测试覆盖允许/拒绝/always/超时/取消与规则匹配；运行面板测试覆盖启动/日志/停止、参数校验、归档工作区与删除时清理进程；Windows Job Object / taskkill 进程树清理测试覆盖取消与崩溃兜底的基础机制；指标测试覆盖空库、Turn/成本/工具/记忆聚合、过滤与错误隐私。真实 SDK 审批已用本机 CLI + CC Switch/DeepSeek 冒烟（PowerShell 允许、文件生成、resume、成本）；真实 SDK 还验证了事实注入/召回（manifest matched + use_count）、取消长驻命令（工具进程终止、状态 canceled、可继续）、强杀后端后的恢复（CLI 树清理、Turn interrupted、审批 expired、锁释放）。
 
 真实服务崩溃测试（会启动并强杀独立后端，使用 Session Turn）：
 
@@ -198,6 +209,7 @@ npm run build
 - 事实触发只按成功 Turn 数与字符数；没有空闲自动结束会话。
 - 不做自动 git 提交、合并、部署或删除文件。
 - 任务内容会发送给 CLI 配置的模型后端；本地存储不等于数据不出本机。
+- 可观测目前只有 M1 API；没有 Dashboard、timeseries/rollups 与告警；`/api/metrics/health` 会探测 CLI，最长约 20 秒。
 - 认证失败、用户级 hooks/MCP、`--add-dir` 和极长 prompt 尚未系统验证。
 
 ## 目录
@@ -213,7 +225,8 @@ data/           本地运行数据、原始日志、日志和备份（gitignored
 
 ## 路线图与历史
 
-- 后续方向、可观测计划与全局系统大盘：`docs/roadmap.md`（M0 真实验收 → M1 最小可观测 → M2 记忆质量 → M3 大盘 → M4 Scholar → M5 体验）。
+- 后续方向、可观测计划与全局系统大盘：`docs/roadmap.md`（M0 真实验收 → M1 最小可观测 ✅ → M2 记忆质量 → M3 大盘 → M4 Scholar → M5 体验）。
+- M2 记忆案例集设计：`docs/evaluation/memory-benchmark.md`（19 个案例，待执行）。
 - v7 之前的阶段路线归档：`docs/roadmap-history.md`。
 - Phase 1–3C 的 Task/Run/Note 工作台与 Mentor v0 已归档为只读旧数据，相关决策见 `docs/decisions/`。
 - 当前模型的决策记录见 `docs/decisions/0006-session-memory.md` 与 `docs/decisions/0007-agent-sdk-approvals.md`。
