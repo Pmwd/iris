@@ -178,7 +178,7 @@ cd frontend
 npm run build
 ```
 
-45 个后端测试通过。测试使用确定性的 fake CLI（CLI 回退）覆盖会话/Turn 执行、SSE 事件、多轮 resume、并发锁、取消与启动校正、原始日志、摘要阈值与失败、compact、事实提取/校验/去重/supersede/注入、作用域与角色过滤、别名召回、schema v8 非破坏迁移、备份与安全头；审批桥接测试覆盖允许/拒绝/always/超时/取消与规则匹配；运行面板测试覆盖启动/日志/停止、参数校验、归档工作区与删除时清理进程；Windows Job Object / taskkill 进程树清理测试覆盖取消与崩溃兜底的基础机制；指标测试覆盖空库、Turn/成本/工具/记忆聚合、过滤与错误隐私。真实 SDK 审批已用本机 CLI + CC Switch/DeepSeek 冒烟（PowerShell 允许、文件生成、resume、成本）；真实 SDK 还验证了事实注入/召回（manifest matched + use_count）、取消长驻命令（工具进程终止、状态 canceled、可继续）、强杀后端后的恢复（CLI 树清理、Turn interrupted、审批 expired、锁释放）。
+46 个后端测试通过。测试使用确定性的 fake CLI（CLI 回退）覆盖会话/Turn 执行、SSE 事件、多轮 resume、并发锁、取消与启动校正、原始日志、摘要阈值与失败、compact、事实提取/校验/去重/supersede/注入、作用域与角色过滤、别名召回、schema v8 非破坏迁移、备份与安全头；审批桥接测试覆盖允许/拒绝/always/超时/取消与规则匹配；运行面板测试覆盖启动/日志/停止、参数校验、归档工作区与删除时清理进程；Windows Job Object / taskkill 进程树清理测试覆盖取消与崩溃兜底的基础机制；指标测试覆盖空库、Turn/成本/工具/记忆聚合、过滤与错误隐私；提取作用域测试覆盖跨工作区/角色事实不进入 existing facts。真实 SDK 验证了 T4–T6、M2 19 个记忆案例（摘要/提取/更新/召回/隔离/冲突/预算），以及取消长驻命令、强杀恢复；并修复自动 project memory 泄漏与跨工作区 update 目标错误。
 
 真实服务崩溃测试（会启动并强杀独立后端，使用 Session Turn）：
 
@@ -226,7 +226,7 @@ data/           本地运行数据、原始日志、日志和备份（gitignored
 ## 路线图与历史
 
 - 后续方向、可观测计划与全局系统大盘：`docs/roadmap.md`（M0 真实验收 → M1 最小可观测 ✅ → M2 记忆质量 → M3 大盘 → M4 Scholar → M5 体验）。
-- M2 记忆案例集设计：`docs/evaluation/memory-benchmark.md`（19 个案例，待执行）。
+- M2 记忆基准：`docs/evaluation/memory-benchmark.md`（19 个案例，真实 SDK 19/19 通过）。
 - v7 之前的阶段路线归档：`docs/roadmap-history.md`。
 - Phase 1–3C 的 Task/Run/Note 工作台与 Mentor v0 已归档为只读旧数据，相关决策见 `docs/decisions/`。
 - 当前模型的决策记录见 `docs/decisions/0006-session-memory.md` 与 `docs/decisions/0007-agent-sdk-approvals.md`。

@@ -263,3 +263,49 @@ def test_concurrent_extraction_conflict(app_client):
     assert second.status_code == 409
     job = wait_for_extraction(client, first.json()["id"])
     assert job["status"] == "succeeded"
+
+
+def test_extraction_existing_facts_are_scoped(client_factory, tmp_path):
+    client, _workspace, app = client_factory()
+    project_a = create_workspace(client, _workspace, name="Scope A")
+    workspace_b = tmp_path / "scope-b"
+    workspace_b.mkdir()
+    project_b = create_workspace(client, workspace_b, name="Scope B")
+
+    facts = app.state.fact_repo
+
+    def add(scope, project_id, role, title):
+        return facts.create_fact(
+            scope=scope,
+            project_id=project_id,
+            role=role,
+            kind="insight",
+            status="accepted",
+            title=title,
+            content_md="",
+        )
+
+    global_fact = add("global", None, "both", "Global")
+    a_coding = add("workspace", project_a["id"], "coding", "A coding")
+    a_scholar = add("workspace", project_a["id"], "scholar", "A scholar")
+    b_coding = add("workspace", project_b["id"], "coding", "B coding")
+
+    memory = app.state.memory_manager
+    scoped_ids = {
+        fact["id"]
+        for fact in memory._accepted_facts_for_extraction(
+            "coding", project_a["id"]
+        )
+    }
+    assert global_fact["id"] in scoped_ids
+    assert a_coding["id"] in scoped_ids
+    assert a_scholar["id"] not in scoped_ids
+    assert b_coding["id"] not in scoped_ids
+
+    global_ids = {
+        fact["id"]
+        for fact in memory._accepted_facts_for_extraction("coding", None)
+    }
+    assert global_fact["id"] in global_ids
+    assert a_coding["id"] not in global_ids
+    assert b_coding["id"] not in global_ids

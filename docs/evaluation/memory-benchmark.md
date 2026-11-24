@@ -1,6 +1,6 @@
 # M2 记忆质量基准：案例集设计（10–20 个）
 
-- 状态：设计稿 v1 + **冒烟 5/5 通过**（2026-11-24）；其余 14 个案例尚未执行
+- 状态：设计稿 v1 + **19/19 已通过**（冒烟 5 + 第二批 8 + 第三批 6，2026-11-24）
 - 目标：验证三层记忆是否真的有用，而不是只看“机制存在”。
 - 环境：真实 Claude CLI/SDK、独立 `IRIS_DATA_DIR`（例如 `artifacts/memory-benchmark`）、固定工作区。
 - 关联：`docs/roadmap.md` M2、`docs/acceptance/m0-real-cli.md`、ADR 0002/0006。
@@ -113,24 +113,24 @@
 | ID | 结果 | 关键证据 | 成本 | 备注 |
 |---|---|---|---|---|
 | A1 | ✅ 通过 | 摘要 3185 字符，含决策/FTS5/向量对比/未决问题 | 摘要 $0.04124 | 见冒烟记录 |
-| A2 | 未执行 | | | |
-| A3 | 未执行 | | | |
-| A4 | 未执行 | | | |
+| A2 | ✅ 通过 | 真实写入 artifact.txt + 运行 TESTS_OK；摘要同时保留文件与测试结果 | | |
+| A3 | ✅ 通过 | 先失败后修复；摘要同时保留失败与修复 | | |
+| A4 | ✅ 通过 | 第 8 Turn 触发自动摘要（covers=8）；继续 2 Turn 后 final 摘要仍保留 SQLite 决策 | | |
 | B1 | ✅ 通过 | 1 条 constraint 候选，含 pnpm/不用 npm | | 见冒烟记录 |
-| B2 | 未执行 | | | |
-| B3 | 未执行 | | | |
+| B2 | ✅ 通过 | 提取出 decision 候选，含 SQLite + 本地/单用户理由 | | |
+| B3 | ✅ 通过 | 2 条候选，未把 Postgres 假设写成 decision/preference/constraint | | 其中一条为 open_question/insight |
 | B4 | ✅ 通过 | update 候选命中旧事实并写 supersedes_id；接受后旧 archived、新 accepted | | 见冒烟记录 |
 | C1 | ✅ 通过 | 目标事实 matched，`use_count` 1；同时注入 B4 的 pnpm 事实并暴露冲突 | | 建议干净工作区复跑 |
-| C2 | 未执行 | | | |
+| C2 | ✅ 通过 | 无关问题（GIL）manifest 为空；首次提示误含“构建信息”导致误命中，已重跑 | | 注意测试提示不得包含事实关键词 |
 | C3 | ✅ 通过（修复后） | manifest 为空；修复自动 memory 泄漏后 `memory_paths=null` | | 见冒烟记录 |
-| C4 | 未执行 | | | |
-| C5 | 未执行 | | | |
-| D1 | 未执行 | | | |
-| D2 | 未执行 | | | |
-| D3 | 未执行 | | | |
-| E1 | 未执行 | | | |
-| E2 | 未执行 | | | |
-| F1 | 未执行 | | | |
+| C4 | ✅ 通过 | Scholar 会话 manifest 为空，未注入 coding 工作区事实 | | |
+| C5 | ✅ 通过 | 查询“怎么打包”命中别名，事实 matched | | |
+| D1 | ✅ 通过（修复后） | 修复提取 existing_facts 的 workspace 作用域后，update 正确指向本工作区旧事实；接受后旧 archived | | 首次失败见 7.2 |
+| D2 | ✅ 通过 | 旧部署地址被 update 归档；新会话只注入新地址，回答使用 new.example.com | | |
+| D3 | ✅ 通过 | 同时注入 webpack/vite 两条冲突事实；模型指出冲突 | | |
+| E1 | ✅ 通过 | 10 条 pinned 事实，注入 5 条 3645 字符，5 条 `reason=budget` | | |
+| E2 | ✅ 通过 | 手动选择 `reason=manual`；超预算返回 422 且不创建 Turn | | |
+| F1 | ✅ 通过 | included/excluded 均带原因，无静默注入 | | |
 
 ## 7. 冒烟执行记录（2026-11-24）
 
@@ -158,6 +158,52 @@
 - C1 在干净工作区复跑，排除 B4 影响。
 - 继续 A2/A3/A4、B2/B3、C2/C4/C5、D1/D2/D3、E1/E2、F1。
 - 记录每个案例的 manifest 与事实状态，不只记录回答文本。
+
+## 7.1 第二批执行记录（2026-11-24）
+
+环境：真实 SDK、独立数据目录、每个案例独立工作区（C1/C2/C4/C5/D3/E1/E2）；结果 `artifacts/m2-full/results.json`。
+
+| 案例 | 结果 | 证据 |
+|---|---|---|
+| C1（干净复跑） | ✅ | 仅目标 npm 事实注入（matched），`use_count` 1；`memory_paths=null` |
+| C2 | ✅（重跑） | GIL 问题 manifest 为空。首次提示含“构建信息”导致误命中，属于测试提示污染 |
+| C4 | ✅ | Scholar 会话 manifest 为空；coding 工作区事实未泄漏 |
+| C5 | ✅ | 查询“怎么打包”通过别名命中“构建命令” |
+| D3 | ✅ | 旧 webpack + 新 vite 两条事实同时注入；回答明确指出版本冲突 |
+| E1 | ✅ | 10 条 pinned 事实；注入 5 条 / 3645 字符；5 条 `reason=budget` |
+| E2 | ✅ | 手动 `fact_ids` → `reason=manual`；超预算 422，未创建 Turn |
+| F1 | ✅ | included/excluded 均带原因 |
+
+### 发现
+
+- 测试提示本身会引入关键词：C2 首次失败不是召回错误，而是提示里写了“构建信息”。
+- 干净工作区复跑 C1 后，之前 B4 造成的 pnpm/npm 冲突消失，召回验证更纯粹。
+- D3 显示当前系统不会自动消解冲突，但会把两条都注入并让模型暴露冲突；作为“暴露”策略可接受，自动合并仍未实现。
+- 预算行为符合预期：pinned 也会被预算裁剪，manifest 给出 `budget` 原因。
+
+## 7.2 第三批执行记录（2026-11-24）
+
+环境：真实 SDK、独立工作区；A2/A3 用 execute 档位并自动允许工具审批。
+
+| 案例 | 结果 | 证据 |
+|---|---|---|
+| A2 | ✅ | 真实创建 `artifact.txt`、运行 `TESTS_OK`；摘要保留文件与测试结果 |
+| A3 | ✅ | 先运行失败命令再运行修复命令；摘要保留失败与修复 |
+| A4 | ✅ | 8 Turn 触发自动摘要（covers=8）；继续 2 Turn 后 final 摘要仍含 SQLite 决策 |
+| B2 | ✅ | 提取出 decision 候选，含 SQLite 与理由 |
+| B3 | ✅ | 2 条候选，没有把 Postgres 假设写成 decision/preference/constraint |
+| D1 | ✅（修复后） | 首次失败：提取器把其他工作区的 accepted 事实作为 update 目标；修复 existing_facts 作用域后重跑，correct update + supersede |
+| D2 | ✅ | old URL 归档，新 URL 注入并用于回答 |
+
+### D1 暴露的 Bug 与修复
+
+- 现象：D1 提取出的 update 候选 `supersedes_id` 指向 **D3 工作区**的 vite 事实，而不是 D1 的 webpack 事实。
+- 根因：`MemoryManager._run_extraction` 用 `list_facts(status="accepted")` 取 existing facts，未按 workspace/role 过滤；提取器因此能看到其他工作区的事实并选中它。
+- 修复：新增 `_accepted_facts_for_extraction(role, project_id)`：
+  - 有 workspace：只取 global + 该 workspace，按 role/coding/both 过滤；
+  - 无 workspace：只取 global。
+- 回归：新增测试验证跨 workspace/scholar 事实不会进入 existing facts；全量 46 个测试通过。
+- 复跑：D1 update 正确指向本工作区旧事实；接受后旧 archived。
 
 ## 8. 判定规则
 

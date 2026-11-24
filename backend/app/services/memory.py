@@ -266,12 +266,12 @@ class MemoryManager:
             if not summaries:
                 raise MemoryError("the selected sessions have no successful summaries", 422)
 
-            existing_facts = self.repo_facts.list_facts(status="accepted", limit=1000)
             workspace = (
                 self.repo_projects.get_project(project_id) if project_id else None
             )
             extraction = self.repo_facts.get_extraction(extraction_id) or {}
             role = (extraction.get("scope") or {}).get("role") or "both"
+            existing_facts = self._accepted_facts_for_extraction(role, project_id)
             prompt = build_extraction_prompt(
                 role=role,
                 workspace=workspace,
@@ -354,6 +354,30 @@ class MemoryManager:
                     "ended_at": utcnow(),
                 },
             )
+
+    def _accepted_facts_for_extraction(
+        self, role: str, project_id: str | None
+    ) -> list[dict[str, Any]]:
+        """Accepted facts the extractor may target for dedupe/update.
+
+        Scope the list to global + the current workspace; otherwise a
+        workspace extraction can target a fact from another workspace.
+        """
+        fact_role = role if role in {"coding", "scholar"} else None
+        if project_id:
+            return self.repo_facts.list_facts(
+                status="accepted",
+                project_id=project_id,
+                role=fact_role,
+                include_global=True,
+                limit=1000,
+            )
+        return self.repo_facts.list_facts(
+            status="accepted",
+            scope="global",
+            role=fact_role,
+            limit=1000,
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle

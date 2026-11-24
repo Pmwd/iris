@@ -3,7 +3,7 @@
 - 状态：已实现（2026-11-24）
 - 目标：能回答“是否健康、在做什么、花了多少、哪里失败”，并保证指标可对账、不含内容。
 - 范围：仅指标层 + 健康/错误 API；**不做** timeseries、rollups、告警、Dashboard。
-- 自动化：`pytest backend/tests/test_metrics.py`（3 个测试），全量 45 个后端测试通过。
+- 自动化：`pytest backend/tests/test_metrics.py`（3 个测试），全量 46 个后端测试通过。
 
 ## 1. API
 
